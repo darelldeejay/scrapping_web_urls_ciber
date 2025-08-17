@@ -3,7 +3,8 @@ import argparse, importlib, sys, traceback
 
 REGISTRY = {
     "netskope": "vendors.netskope",
-    "proofpoint": "vendors.proofpoint",  # ← nuevo
+    "proofpoint": "vendors.proofpoint",
+    "qualys": "vendors.qualys",       # ← nuevo
 }
 
 def main():
