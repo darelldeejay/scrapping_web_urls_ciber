@@ -1,2 +1,2 @@
-selenium
+selenium==4.35.0
 requests
