@@ -147,11 +147,11 @@ def expandir_past_incidents(driver: webdriver.Chrome) -> None:
 
 
 # =========================
-# Parsing
+# Parsing helpers
 # =========================
 MONTHS = "Jan|Feb|Mar|Apr|May|Jun|Jul|Aug|Sep|Oct|Nov|Dec|Ene|Feb|Mar|Abr|May|Jun|Jul|Ago|Sep|Oct|Nov|Dic"
 DATE_REGEX = rf"({MONTHS})\s+\d{{1,2}},?\s+\d{{4}}(?:\s+\d{{1,2}}:\d{{2}}\s*(AM|PM)?)?\s*(UTC|GMT|[A-Z]{{2,4}})?"
-STATUS_TOKENS = ["Resolved", "Mitigated", "Monitoring", "Identified", "Investigating", "Update", "Degraded"]
+STATUS_TOKENS = ["Resolved", "Mitigated", "Monitoring", "Identified", "Investigating", "Degraded", "Update"]
 
 
 def parse_datetime_any(text: str):
@@ -176,11 +176,62 @@ def parse_datetime_any(text: str):
     return None
 
 
+def find_nearest_header_date(node):
+    """
+    Busca la fecha del encabezado (p.ej. <h5> 'Aug 15, 2025') más cercano por encima.
+    """
+    cur = node
+    steps = 0
+    while cur and steps < 15:
+        sib = getattr(cur, "previous_sibling", None)
+        while sib:
+            if getattr(sib, "get_text", None):
+                txt = sib.get_text(strip=True)
+                dt = parse_datetime_any(txt)
+                if dt:
+                    return dt
+            sib = getattr(sib, "previous_sibling", None)
+        cur = getattr(cur, "parent", None)
+        steps += 1
+    return None
+
+
+def incident_container_for(node):
+    """
+    Si el selector nos dio un <a>, asciende al contenedor de la tarjeta que
+    contiene la cronología (Resolved/Mitigated/...).
+    """
+    cur = node
+    for _ in range(8):
+        if not hasattr(cur, "get_text"):
+            break
+        classes = cur.get("class") if hasattr(cur, "get") else None
+        class_str = " ".join(classes).lower() if isinstance(classes, list) else (classes or "")
+        txt = cur.get_text(" ", strip=True).lower()
+        if ("incident" in class_str) or any(s in txt for s in ["resolved", "mitigated", "investigating", "identified", "update", "monitoring", "degraded"]):
+            return cur
+        cur = getattr(cur, "parent", None)
+        if cur is None:
+            break
+    return node
+
+
+def nearest_date_after(label_text: str, full_text: str):
+    """Primera fecha tras la ocurrencia de label_text (p.ej., 'Resolved')."""
+    try:
+        pos = full_text.lower().find(label_text.lower())
+        if pos == -1:
+            return None
+        window = full_text[pos: pos + 400]
+        m = re.search(DATE_REGEX, window, flags=re.I)
+        if m:
+            return parse_datetime_any(m.group(0))
+    except Exception:
+        pass
+    return None
+
+
 def find_section_container(soup: BeautifulSoup, keywords: list[str]):
-    """
-    Devuelve el contenedor del heading que contiene alguna keyword.
-    Si no hay heading, devuelve None (no usamos fallback global aquí).
-    """
     heading = None
     for kw in keywords:
         heading = soup.find(
@@ -199,21 +250,15 @@ def find_section_container(soup: BeautifulSoup, keywords: list[str]):
 
 
 def cards_in_container(container: BeautifulSoup):
-    """
-    Busca tarjetas dentro del contenedor y, si no hay, recorre los siguientes
-    hermanos hasta encontrar tarjetas o toparse con otro heading.
-    """
     if not container:
         return []
     cards = container.select(".incident, [class*='incident'], a[href*='/incidents/']")
     if cards:
         return cards
-    # Explora siblings (la página coloca h5 de fecha y luego el div de tarjetas)
     out = []
     for sib in container.next_siblings:
         if not hasattr(sib, "get_text"):
             continue
-        # Si llegamos a otro heading principal, paramos
         if sib.name in ["h1", "h2", "h3", "h4", "summary"]:
             break
         out.extend(sib.select(".incident, [class*='incident'], a[href*='/incidents/']"))
@@ -224,10 +269,8 @@ def cards_in_container(container: BeautifulSoup):
 
 def extract_sections_strict(soup: BeautifulSoup):
     """
-    Devuelve (cards_open, cards_past) separando por headings.
-    Recorremos TODOS los elementos después del heading correspondiente
-    hasta topar con un heading “grande” de otra sección.
-    Además, si 'past' queda vacío, hacemos un fallback global.
+    Devuelve (cards_open, cards_past) recorriendo a partir de los headings
+    y con fallback global para 'past' si quedara vacío.
     """
     def find_heading(keywords):
         for kw in keywords:
@@ -245,12 +288,10 @@ def extract_sections_strict(soup: BeautifulSoup):
         if not heading:
             return cards
         for node in heading.find_all_next(True):
-            # si encontramos otro heading “grande” que indique otra sección, paramos
             if node.name in ["h1","h2","h3","h4","summary"]:
                 txt = node.get_text(strip=True).lower()
                 if any(sk in txt for sk in stop_keywords):
                     break
-            # recoge posibles tarjetas/enlaces dentro del nodo
             cards.extend(node.select(".incident, [class*='incident'], a[href*='/incidents/']"))
         return cards
 
@@ -260,8 +301,6 @@ def extract_sections_strict(soup: BeautifulSoup):
     open_cards = collect_after(open_heading, ["past incidents", "previous 15 days", "maintenance", "status", "home"])
     past_cards = collect_after(past_heading, ["open incidents", "maintenance", "status", "home"])
 
-    # Fallback prudente: si no encontramos past_cards, tomamos todos los anchors de incidentes
-    # y les restamos los que ya pertenecen a "open".
     if not past_cards:
         all_anchors = soup.select("a[href*='/incidents/']")
         open_hrefs = set()
@@ -274,60 +313,50 @@ def extract_sections_strict(soup: BeautifulSoup):
     return open_cards, past_cards
 
 
-def nearest_date_after(label_text: str, full_text: str):
-    """Primera fecha tras la ocurrencia de label_text (p.ej., 'Resolved')."""
-    try:
-        pos = full_text.lower().find(label_text.lower())
-        if pos == -1:
-            return None
-        window = full_text[pos: pos + 400]
-        m = re.search(DATE_REGEX, window, flags=re.I)
-        if m:
-            return parse_datetime_any(m.group(0))
-    except Exception:
-        pass
-    return None
-
-
+# =========================
+# Normalización
+# =========================
 def normalize_card(card) -> dict:
     """
     Convierte un nodo de incidente a dict estándar.
-    - Si aparece 'Resolved' en la cronología, status='Resolved' y ended_at≈fecha de 'Resolved'.
-    - started_at: intenta primera fecha del bloque; si no, la más antigua encontrada.
+    - Si el selector nos dio un <a>, subimos al contenedor del incidente.
+    - Prioriza estado 'Resolved' si aparece en la cronología.
+    - Fechas desde <time>, regex y (si falta) el h5/h6 de fecha cercano.
     """
-    text = card.get_text(separator=" ", strip=True)
+    container = card
+    if getattr(card, "name", None) == "a":
+        container = incident_container_for(card)
+
+    # URL + título
     url = None
-
-    # Si el propio nodo es un <a>, úsalo
-    if getattr(card, "name", None) == "a" and card.get("href"):
-        href = card.get("href")
+    a = container.find("a", href=True)
+    if a and "/incidents" in a.get("href", ""):
+        href = a["href"]
         url = "https://trustportal.netskope.com" + href if href.startswith("/") else href
-        title = card.get_text(strip=True) or "Netskope Incident"
-    else:
-        a = card.find("a", href=True)
-        if a and "/incidents" in a.get("href", ""):
-            href = a["href"]
-            url = "https://trustportal.netskope.com" + href if href.startswith("/") else href
-        # Título
-        title = None
-        for cls in ["incident-title", "title", "card-title"]:
-            el = card.find(class_=re.compile(cls, re.I))
-            if el:
-                title = el.get_text(strip=True)
-                break
-        if not title:
-            h = card.find(["h1", "h2", "h3", "h4"])
-            if h:
-                title = h.get_text(strip=True)
-        if not title:
-            title = " ".join((text or "").split()[:14]) or "Netskope Incident"
 
-    # Fechas
+    title = None
+    for cls in ["incident-title", "title", "card-title"]:
+        el = container.find(class_=re.compile(cls, re.I))
+        if el:
+            title = el.get_text(strip=True)
+            break
+    if not title:
+        h = container.find(["h1", "h2", "h3", "h4"])
+        if h:
+            title = h.get_text(strip=True)
+    if not title and a:
+        title = a.get_text(strip=True)
+    if not title:
+        title = "Netskope Incident"
+
+    # Texto completo del contenedor
+    text = container.get_text(separator=" ", strip=True) if hasattr(container, "get_text") else ""
+
+    # Fechas: <time> → regex → encabezado cercano
     started_at = None
     ended_at = None
 
-    # <time> tags
-    times = card.find_all("time") if hasattr(card, "find_all") else []
+    times = container.find_all("time") if hasattr(container, "find_all") else []
     parsed_times = []
     for t in times:
         dt = parse_datetime_any(t.get("datetime") or t.get_text(strip=True))
@@ -338,7 +367,6 @@ def normalize_card(card) -> dict:
         started_at = parsed_times[0]
         ended_at = parsed_times[-1]
 
-    # Regex de respaldo
     if not started_at or not ended_at:
         all_dates = [parse_datetime_any(m.group(0)) for m in re.finditer(DATE_REGEX, text or "", flags=re.I)]
         all_dates = [d for d in all_dates if d]
@@ -347,16 +375,20 @@ def normalize_card(card) -> dict:
         if all_dates and not ended_at:
             ended_at = max(all_dates)
 
-    # Estado
+    if not started_at:
+        started_at = find_nearest_header_date(container)
+
+    # Estado con prioridad
     status = None
-    if "resolved" in (text or "").lower():
+    lower_text = (text or "").lower()
+    if "resolved" in lower_text:
         status = "Resolved"
-        resolved_dt = nearest_date_after("Resolved", text)
-        if resolved_dt:
-            ended_at = resolved_dt
+        rd = nearest_date_after("Resolved", text)
+        if rd:
+            ended_at = rd
     if not status:
-        for tok in STATUS_TOKENS:
-            if tok.lower() in (text or "").lower():
+        for tok in ["Mitigated", "Monitoring", "Identified", "Investigating", "Degraded", "Update"]:
+            if tok.lower() in lower_text:
                 status = tok
                 break
     if not status:
@@ -384,6 +416,9 @@ def dedup_incidents(items: list[dict]) -> list[dict]:
     return out
 
 
+# =========================
+# Scrape + clasificación
+# =========================
 def analizar_netskope(driver: webdriver.Chrome) -> tuple[list[dict], list[dict]]:
     print("🔍 Cargando Netskope...")
     driver.get(NETSKOPE_URL)
@@ -425,7 +460,21 @@ def analizar_netskope(driver: webdriver.Chrome) -> tuple[list[dict], list[dict]]
     activos = dedup_incidents(activos)
     pasados = dedup_incidents(pasados)
 
-    # Filtra 'pasados' a 15 días
+    # Quitar de 'activos' cualquier incidente presente en 'pasados'
+    past_urls = {i.get("url") for i in pasados if i.get("url")}
+    past_titles = {(i.get("title") or "").strip() for i in pasados}
+    activos = [
+        i for i in activos
+        if (i.get("url") not in past_urls) and ((i.get("title") or "").strip() not in past_titles)
+    ]
+
+    # En 'pasados', si no se leyó estado claro, márcalo 'Resolved'
+    for i in pasados:
+        st = (i.get("status") or "").lower()
+        if st not in ("resolved", "mitigated", "monitoring", "identified", "investigating", "degraded", "update"):
+            i["status"] = "Resolved"
+
+    # Filtrar 'pasados' a 15 días
     now = datetime.utcnow().replace(tzinfo=timezone.utc)
     cutoff = now - timedelta(days=LOOKBACK_DAYS)
 
@@ -437,12 +486,15 @@ def analizar_netskope(driver: webdriver.Chrome) -> tuple[list[dict], list[dict]]
 
     pasados_15 = [i for i in pasados if in_lookback(i)]
 
-    # No marcar como activos los 'Resolved'
+    # En activos, descartar cualquier 'Resolved' (por si el portal lo dejara arriba transitoriamente)
     activos = [i for i in activos if (i.get("status") or "").lower() != "resolved"]
 
     return activos, pasados_15
 
 
+# =========================
+# Formato de salida
+# =========================
 def formatear_resumen(activos: list[dict], pasados: list[dict]) -> str:
     now = datetime.utcnow().strftime("%Y-%m-%d %H:%M UTC")
     partes = [f"<b>Netskope - Estado de Incidentes</b>\n<i>{now}</i>"]
@@ -487,7 +539,6 @@ def main() -> int:
     try:
         driver = iniciar_driver()
         activos, pasados_15 = analizar_netskope(driver)
-
         resumen = formatear_resumen(activos, pasados_15)
 
         print("\n===== RESUMEN A ENVIAR =====")
