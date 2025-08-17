@@ -12,7 +12,7 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        vendor: [netskope, proofpoint, qualys, aruba, imperva, cyberak]
+        vendor: [netskope, proofpoint, qualys, aruba, imperva, cyberark]
 
     env:
       TELEGRAM_BOT_TOKEN: ${{ secrets.TELEGRAM_BOT_TOKEN }}
