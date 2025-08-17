@@ -2,8 +2,6 @@
 import os
 import re
 import traceback
-from datetime import datetime, timezone
-
 from bs4 import BeautifulSoup
 from selenium.webdriver.common.by import By
 from selenium.webdriver.support.ui import WebDriverWait
@@ -16,16 +14,12 @@ from common.format import header, render_incidents
 URL = "https://proofpoint.my.site.com/community/s/proofpoint-current-incidents"
 SAVE_HTML = os.getenv("SAVE_HTML", "0") == "1"
 
-# Palabras que podrían aparecer en títulos/estados (por si algún día listan detalles)
-STATUS_HINTS = ["Investigating", "Identified", "Monitoring", "Mitigated", "Update", "Degraded", "Resolved"]
-
 
 def wait_for_page(driver):
-    # Espera a que aparezca el heading o el mensaje de "No incidents"
+    # Espera a que cargue el encabezado o el mensaje de "No incidents"
     preds = [
         (By.XPATH, "//*[contains(translate(., 'abcdefghijklmnopqrstuvwxyz', 'ABCDEFGHIJKLMNOPQRSTUVWXYZ'), 'PROOFPOINT CURRENT INCIDENTS')]"),
         (By.XPATH, "//*[contains(translate(., 'abcdefghijklmnopqrstuvwxyz', 'ABCDEFGHIJKLMNOPQRSTUVWXYZ'), 'NO CURRENT IDENTIFIED INCIDENTS')]"),
-        (By.CSS_SELECTOR, "main, div, section"),  # fallback
     ]
     for by, sel in preds:
         try:
@@ -33,66 +27,52 @@ def wait_for_page(driver):
             return
         except Exception:
             continue
+    # Fallback genérico
+    WebDriverWait(driver, 15).until(EC.presence_of_element_located((By.CSS_SELECTOR, "body")))
+
+
+def page_text(soup: BeautifulSoup) -> str:
+    return " ".join([s.strip() for s in soup.stripped_strings]).lower()
 
 
 def parse_incidents(html: str):
     soup = BeautifulSoup(html, "lxml")
+    txt = page_text(soup)
 
-    # 1) Si muestran "No current identified incidents" -> sin incidentes
-    no_inc = soup.find(string=re.compile(r"No\s+current\s+identified\s+incidents", re.I))
-    if no_inc:
-        return [], []  # activos, pasados (Proofpoint no publica pasados en esta URL)
+    # Caso simple (y habitual): mensaje de "no incidents"
+    if "no current identified incidents" in txt:
+        return [], []
 
-    # 2) Intentar localizar el bloque bajo el heading "PROOFPOINT CURRENT INCIDENTS"
-    heading = soup.find(
-        lambda tag: tag.name in ["h1", "h2", "h3", "div", "p"]
-        and tag.get_text(strip=True)
-        and "proofpoint current incidents" in tag.get_text(strip=True).lower()
-    )
-    container = None
-    if heading:
-        # Primero intenta dentro del mismo contenedor
-        container = heading.parent if heading.parent else heading
-        # Si no aparecen enlaces ahí, recorre siblings siguientes
-        if not container.select("a[href]"):
-            container = heading.find_next("div") or heading
-
-    # 3) Extraer items: esta página normalmente solo lista activos; si alguna vez listan cards,
-    # tomamos enlaces/filas visibles dentro del contenedor o, si no, de toda la página.
-    anchors = []
-    scope = container if container else soup
-    anchors = scope.select("a[href]")
-
+    # Si algún día listan incidentes, solo aceptamos entradas que contengan "Incident ####"
+    # para evitar falsos positivos con enlaces de navegación.
+    incident_nodes = soup.find_all(string=re.compile(r"\bIncident\s+\d+", re.I))
     incidents = []
-    for a in anchors:
-        txt = (a.get_text(" ", strip=True) or "")
-        href = a.get("href", "")
-        # Filtrar enlaces de navegación obvios
-        if not txt or len(txt) < 6:
-            continue
-        if re.search(r"support\s*case|knowledge|community|login|help", txt, re.I):
-            continue
-        # Preferimos anchors dentro del bloque principal (evita cabeceras/footers)
-        title = txt
-        url = href if href.startswith("http") else f"https://proofpoint.my.site.com{href}" if href.startswith("/") else href
-
-        # Heurística muy suave: si el texto contiene una pista de estado, úsala; si no, "Update"
-        status = next((s for s in STATUS_HINTS if s.lower() in txt.lower()), "Update")
+    for s in incident_nodes:
+        container = s.parent
+        # Intenta encontrar el <a> más cercano con href (detalle del incidente)
+        a = container.find("a", href=True) if hasattr(container, "find") else None
+        url = None
+        title = s.strip()
+        if a and "/community" not in a.get("href", ""):
+            href = a["href"]
+            url = href if href.startswith("http") else f"https://proofpoint.my.site.com{href}" if href.startswith("/") else href
+            if a.get_text(strip=True):
+                title = a.get_text(strip=True)
 
         incidents.append({
             "title": title,
-            "status": status,
+            "status": "Update",
             "url": url,
-            "started_at": None,  # esta página no publica fechas en la vista simple
+            "started_at": None,
             "ended_at": None,
-            "raw_text": txt,
+            "raw_text": s,
         })
 
-    # Si no detectamos items fiables, tratamos como "sin incidentes"
+    # Si no identificamos ninguna entrada válida, considera que no hay incidentes
     if not incidents:
         return [], []
 
-    # La URL solo muestra incidentes ACTUALES
+    # Esta URL solo publica incidentes actuales
     return incidents, []
 
 
