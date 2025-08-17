@@ -176,10 +176,31 @@ def parse_datetime_any(text: str):
     return None
 
 
+def nearest_date_after(label_text: str, full_text: str):
+    """Primera fecha tras la ocurrencia de label_text (p.ej., 'Resolved')."""
+    try:
+        pos = full_text.lower().find(label_text.lower())
+        if pos == -1:
+            return None
+        window = full_text[pos: pos + 400]
+        m = re.search(DATE_REGEX, window, flags=re.I)
+        if m:
+            return parse_datetime_any(m.group(0))
+    except Exception:
+        pass
+    return None
+
+
+def nearest_date_after_any(labels, text: str):
+    for lab in labels:
+        dt = nearest_date_after(lab, text)
+        if dt:
+            return dt
+    return None
+
+
 def find_nearest_header_date(node):
-    """
-    Busca la fecha del encabezado (p.ej. <h5> 'Aug 15, 2025') más cercano por encima.
-    """
+    """Fecha del encabezado (p.ej. <h5> 'Aug 15, 2025') más cercano por encima."""
     cur = node
     steps = 0
     while cur and steps < 15:
@@ -208,27 +229,14 @@ def incident_container_for(node):
         classes = cur.get("class") if hasattr(cur, "get") else None
         class_str = " ".join(classes).lower() if isinstance(classes, list) else (classes or "")
         txt = cur.get_text(" ", strip=True).lower()
-        if ("incident" in class_str) or any(s in txt for s in ["resolved", "mitigated", "investigating", "identified", "update", "monitoring", "degraded"]):
+        if ("incident" in class_str) or any(s in txt for s in [
+            "resolved", "mitigated", "investigating", "identified", "update", "monitoring", "degraded"
+        ]):
             return cur
         cur = getattr(cur, "parent", None)
         if cur is None:
             break
     return node
-
-
-def nearest_date_after(label_text: str, full_text: str):
-    """Primera fecha tras la ocurrencia de label_text (p.ej., 'Resolved')."""
-    try:
-        pos = full_text.lower().find(label_text.lower())
-        if pos == -1:
-            return None
-        window = full_text[pos: pos + 400]
-        m = re.search(DATE_REGEX, window, flags=re.I)
-        if m:
-            return parse_datetime_any(m.group(0))
-    except Exception:
-        pass
-    return None
 
 
 def find_section_container(soup: BeautifulSoup, keywords: list[str]):
@@ -314,48 +322,58 @@ def extract_sections_strict(soup: BeautifulSoup):
 
 
 # =========================
-# Normalización
+# Normalización de tarjetas
 # =========================
 def normalize_card(card) -> dict:
     """
-    Convierte un nodo de incidente a dict estándar.
-    - Si el selector nos dio un <a>, subimos al contenedor del incidente.
-    - Prioriza estado 'Resolved' si aparece en la cronología.
-    - Fechas desde <time>, regex y (si falta) el h5/h6 de fecha cercano.
+    Normaliza una tarjeta de incidente:
+    - Título: del <a href="/incidents/..."> cuyo texto contiene "Incident <id>".
+      (evita tomar el <div class="title"> del timeline: Resolved/Update…)
+    - Fechas: inicio = Investigating/Identified ; fin = Resolved (si existe).
+    - Estado: prioriza 'Resolved'; luego Mitigated/Monitoring/Identified/Investigating/Degraded/Update.
     """
+    # 1) Subir al contenedor real si nos dieron un <a>
     container = card
     if getattr(card, "name", None) == "a":
         container = incident_container_for(card)
 
-    # URL + título
+    # 2) URL y título preferidos del enlace de encabezado del incidente
     url = None
-    a = container.find("a", href=True)
-    if a and "/incidents" in a.get("href", ""):
-        href = a["href"]
-        url = "https://trustportal.netskope.com" + href if href.startswith("/") else href
+    incident_link = None
+    for a in container.find_all("a", href=True):
+        href = a.get("href", "")
+        if "/incidents" in href:
+            txt = a.get_text(" ", strip=True)
+            if re.search(r"\bIncident\s+\d+", txt, flags=re.I):
+                incident_link = a
+                break
+            if not incident_link:
+                incident_link = a
 
-    title = None
-    for cls in ["incident-title", "title", "card-title"]:
-        el = container.find(class_=re.compile(cls, re.I))
+    if incident_link:
+        href = incident_link["href"]
+        url = "https://trustportal.netskope.com" + href if href.startswith("/") else href
+        title = incident_link.get_text(" ", strip=True)
+    else:
+        title = None
+        el = container.find(class_=re.compile(r"incident-title|card-title", re.I))
         if el:
             title = el.get_text(strip=True)
-            break
-    if not title:
-        h = container.find(["h1", "h2", "h3", "h4"])
-        if h:
-            title = h.get_text(strip=True)
-    if not title and a:
-        title = a.get_text(strip=True)
-    if not title:
-        title = "Netskope Incident"
+        if not title:
+            h = container.find(["h1", "h2", "h3", "h4"])
+            if h:
+                title = h.get_text(strip=True)
+        if not title:
+            title = "Netskope Incident"
 
-    # Texto completo del contenedor
-    text = container.get_text(separator=" ", strip=True) if hasattr(container, "get_text") else ""
+    # 3) Texto completo del contenedor
+    text = container.get_text(" ", strip=True) if hasattr(container, "get_text") else ""
 
-    # Fechas: <time> → regex → encabezado cercano
+    # 4) FECHAS
     started_at = None
     ended_at = None
 
+    # 4.1 <time> (por si vienen)
     times = container.find_all("time") if hasattr(container, "find_all") else []
     parsed_times = []
     for t in times:
@@ -367,32 +385,38 @@ def normalize_card(card) -> dict:
         started_at = parsed_times[0]
         ended_at = parsed_times[-1]
 
-    if not started_at or not ended_at:
-        all_dates = [parse_datetime_any(m.group(0)) for m in re.finditer(DATE_REGEX, text or "", flags=re.I)]
-        all_dates = [d for d in all_dates if d]
-        if all_dates and not started_at:
-            started_at = min(all_dates)
-        if all_dates and not ended_at:
-            ended_at = max(all_dates)
+    # 4.2 Regex libre
+    all_dates = [parse_datetime_any(m.group(0)) for m in re.finditer(DATE_REGEX, text or "", flags=re.I)]
+    all_dates = [d for d in all_dates if d]
 
+    # Inicio = tras 'Investigating' o 'Identified' ; si no, la más antigua
+    start_from_label = nearest_date_after_any(["Investigating", "Identified"], text)
+    if start_from_label:
+        started_at = start_from_label
+    elif not started_at and all_dates:
+        started_at = min(all_dates)
+
+    # Fin = tras 'Resolved' ; si no hay, la más reciente como último update
+    end_from_resolved = nearest_date_after("Resolved", text)
+    if end_from_resolved:
+        ended_at = end_from_resolved
+    elif not ended_at and all_dates:
+        ended_at = max(all_dates)
+
+    # Si seguimos sin inicio, usa el encabezado h5/h6 cercano (día de la tarjeta)
     if not started_at:
         started_at = find_nearest_header_date(container)
 
-    # Estado con prioridad
-    status = None
+    # 5) ESTADO (prioridad)
     lower_text = (text or "").lower()
     if "resolved" in lower_text:
         status = "Resolved"
-        rd = nearest_date_after("Resolved", text)
-        if rd:
-            ended_at = rd
-    if not status:
-        for tok in ["Mitigated", "Monitoring", "Identified", "Investigating", "Degraded", "Update"]:
-            if tok.lower() in lower_text:
-                status = tok
-                break
-    if not status:
-        status = "Update"
+    else:
+        status = next(
+            (tok for tok in ["Mitigated", "Monitoring", "Identified", "Investigating", "Degraded", "Update"]
+             if tok.lower() in lower_text),
+            "Update"
+        )
 
     return {
         "title": title,
