@@ -1,4 +1,4 @@
-name: Web Status Monitor
+name: Web Status Monitor_antes_reemplazo
 
 on:
   workflow_dispatch:
