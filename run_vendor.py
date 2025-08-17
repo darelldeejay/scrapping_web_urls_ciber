@@ -2,12 +2,13 @@
 import argparse, importlib, sys, traceback
 
 REGISTRY = {
-    "netskope": "vendors.netskope",
-    "proofpoint": "vendors.proofpoint",
-    "qualys": "vendors.qualys",
-    "aruba": "vendors.aruba",
-    "imperva": "vendors.imperva",
-    "cyberark": "vendors.cyberark",  # ← NUEVO
+  "netskope": "vendors.netskope",
+  "proofpoint": "vendors.proofpoint",
+  "qualys": "vendors.qualys",
+  "aruba": "vendors.aruba",
+  "imperva": "vendors.imperva",
+  "cyberark": "vendors.cyberark",
+  "trendmicro": "vendors.trendmicro",  # ← NUEVO
 }
 
 def main():
