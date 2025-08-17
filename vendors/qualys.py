@@ -19,7 +19,7 @@ SAVE_HTML = os.getenv("SAVE_HTML", "0") == "1"
 
 MONTHS = "Jan|Feb|Mar|Apr|May|Jun|Jul|Aug|Sep|Oct|Nov|Dec|Ene|Feb|Mar|Abr|May|Jun|Jul|Ago|Sep|Oct|Nov|Dic"
 
-# Acepta '-' o '–' entre horas, y TZ de 2-4 letras (PDT, CEST, etc.)
+# Acepta '-' o '–' y TZ de 2-4 letras (PDT, CEST, etc.)
 DATE_LINE_RE = re.compile(
     rf"\b({MONTHS})\s+\d{{1,2}},\s+\d{{1,2}}:\d{{2}}\s*[-–]\s*(?:({MONTHS})\s+\d{{1,2}},\s+)?\d{{1,2}}:\d{{2}}\s*(UTC|GMT|[A-Z]{{2,4}})\b",
     re.I,
@@ -54,43 +54,40 @@ def parse_dt_utc(s: str):
         return None
 
 
-def nearest_month_year(node):
-    """Busca el 'August 2025' más cercano hacia arriba/atrás para completar el año en líneas sin año."""
+def nearest_year(node):
+    """Busca el año del encabezado de mes (p.ej. 'June 2025') subiendo por el DOM."""
     cur = node
     for _ in range(12):
         sib = getattr(cur, "previous_sibling", None)
         while sib:
             if getattr(sib, "get_text", None):
-                txt = sib.get_text(strip=True)
-                m = MONTH_YEAR_RE.search(txt or "")
+                m = MONTH_YEAR_RE.search(sib.get_text(" ", strip=True))
                 if m:
-                    return m.group(1), int(m.group(2))
+                    return int(m.group(2))
             sib = getattr(sib, "previous_sibling", None)
         cur = getattr(cur, "parent", None)
         if not cur:
             break
         if getattr(cur, "get_text", None):
-            txt = cur.get_text(" ", strip=True)
-            m = MONTH_YEAR_RE.search(txt or "")
+            m = MONTH_YEAR_RE.search(cur.get_text(" ", strip=True))
             if m:
-                return m.group(1), int(m.group(2))
-    return None, None
+                return int(m.group(2))
+    return None
 
 
 def parse_date_range(line_text: str, node_for_context):
-    """Convierte 'Aug 11, 10:01 - 14:00 PDT' a (start_utc, end_utc)."""
+    """Convierte 'Jun 13, 09:18 - Jun 14, 11:18 PDT' en (start_utc, end_utc)."""
     m = DATE_LINE_RE.search(line_text or "")
     if not m:
         return None, None
 
     tz = m.group(3) or "UTC"
-    left = line_text[: m.end()].split(m.group(0).split()[3])[0]  # robustez no crítica
-    # Más simple: dividir por el primer separador '-' o '–'
-    parts = re.split(r"\s*[-–]\s*", line_text[: m.end()])
-    left = parts[0].strip().rstrip(",")
-    right = parts[1].strip() if len(parts) > 1 else ""
+    # divide por el primer separador '-' o '–'
+    parts = re.split(r"\s*[-–]\s*", m.group(0))
+    left = (parts[0] or "").strip().rstrip(",")
+    right = (parts[1] or "").strip()
 
-    _, year_ctx = nearest_month_year(node_for_context)
+    year_ctx = nearest_year(node_for_context)
 
     start_str = left
     if not re.search(r"\b(UTC|GMT|[A-Z]{2,4})\b", start_str, flags=re.I):
@@ -119,34 +116,56 @@ def count_date_lines(node) -> int:
         return 0
 
 
-def card_from_date_node(date_node):
+def find_cards(soup: BeautifulSoup):
     """
-    Sube por los ancestros hasta encontrar el primer <div> cuyo texto contiene
-    **exactamente UNA** línea de fecha (el card). Si al subir encuentras uno
-    con >1, devuelve el último con ==1.
+    Un 'card' es el <div> más cercano cuyo texto contiene EXACTAMENTE 1 línea
+    de fecha. Filtramos aquellos cuyo ancestro (hasta 6 niveles) también
+    tenga exactamente 1 fecha, para quedarnos con el contenedor correcto.
     """
-    node = date_node.parent
-    candidate = None
-    for _ in range(8):
-        if not node:
-            break
-        if getattr(node, "name", None) == "div":
-            c = count_date_lines(node)
-            if c == 1:
-                candidate = node  # posible card
-            elif c > 1 and candidate is not None:
-                break  # hemos salido al contenedor de mes
-        node = getattr(node, "parent", None)
-    return candidate or date_node.parent
+    candidates = []
+    for div in soup.find_all("div"):
+        if count_date_lines(div) == 1:
+            candidates.append(div)
+
+    cards = []
+    for c in candidates:
+        anc_has_one = False
+        p = c.parent
+        for _ in range(6):
+            if not p or getattr(p, "name", None) != "div":
+                break
+            if count_date_lines(p) == 1:
+                anc_has_one = True
+                break
+            p = p.parent
+        if not anc_has_one:
+            cards.append(c)
+
+    # quitar duplicados por id
+    seen = set()
+    uniq = []
+    for c in cards:
+        if id(c) not in seen:
+            seen.add(id(c))
+            uniq.append(c)
+    return uniq
 
 
 def anchor_before_date(card):
-    """Devuelve el <a href> que aparece ANTES de la línea de fecha dentro del card."""
-    date_node = card.find(string=DATE_LINE_RE)
+    """Devuelve el <a> que aparece ANTES de la línea de fecha dentro del card."""
+    # reconstruimos la fecha como patrón y recorremos en orden de aparición
+    date_txt = None
+    for s in card.stripped_strings:
+        if DATE_LINE_RE.search(s):
+            date_txt = s
+            break
+
     last_a = None
     for el in card.descendants:
-        if el == date_node:
-            break
+        if isinstance(el, str):
+            if date_txt and el.strip() and date_txt in el:
+                break
+            continue
         if getattr(el, "name", None) == "a" and el.has_attr("href"):
             t = el.get_text(" ", strip=True) or ""
             if not t:
@@ -155,20 +174,6 @@ def anchor_before_date(card):
                 continue
             last_a = el
     return last_a
-
-
-def derive_title(card, card_text: str) -> str:
-    """Título por fallback: primera línea relevante antes de la fecha."""
-    lines = [ln.strip() for ln in (card_text or "").split("\n") if ln.strip()]
-    for ln in lines:
-        if DATE_LINE_RE.search(ln):
-            break
-        if ln.startswith("[Scheduled]") or "scheduled maintenance" in ln.lower():
-            continue
-        if re.search(r"has been resolved|has been mitigated|has been completed", ln, re.I):
-            continue
-        return ln
-    return "Qualys Incident"
 
 
 def qualys_status_from_text(text: str) -> str:
@@ -180,6 +185,21 @@ def qualys_status_from_text(text: str) -> str:
     if "service disruption" in low or "degraded" in low or "impact" in low:
         return "Incident"
     return "Update"
+
+
+def first_non_scheduled_line_before_date(card_text: str) -> str:
+    lines = [ln.strip() for ln in (card_text or "").split("\n") if ln.strip()]
+    title = None
+    for ln in lines:
+        if DATE_LINE_RE.search(ln):
+            break
+        if ln.startswith("[Scheduled]") or "scheduled maintenance" in ln.lower():
+            continue
+        if re.search(r"has been resolved|has been mitigated|has been completed", ln, re.I):
+            continue
+        title = ln
+        break
+    return title or "Qualys Incident"
 
 
 def analizar_qualys(driver):
@@ -197,34 +217,21 @@ def analizar_qualys(driver):
 
     soup = BeautifulSoup(html, "lxml")
 
-    # 1) Localiza TODAS las líneas de fecha y construye un card por cada una
-    date_nodes = soup.find_all(string=DATE_LINE_RE)
-    cards = []
-    seen = set()
-    for dn in date_nodes:
-        card = card_from_date_node(dn)
-        key = id(card)
-        if key not in seen:
-            seen.add(key)
-            cards.append(card)
-
-    # 2) Extrae cada tarjeta (ignorando programadas)
     items = []
-    for card in cards:
+    for card in find_cards(soup):
         card_text = card.get_text("\n", strip=True)
 
-        # Ignorar todo lo programado SOLO dentro de este card
+        # Ignorar SOLO si el card es programado
         if "[Scheduled]" in card_text or "scheduled maintenance" in card_text.lower():
             continue
 
-        # Título + URL
         a = anchor_before_date(card)
         if a:
             title = a.get_text(" ", strip=True)
             href = a.get("href", "")
             url = href if href.startswith("http") else f"https://status.qualys.com{href}" if href.startswith("/") else href
         else:
-            title = derive_title(card, card_text)
+            title = first_non_scheduled_line_before_date(card_text)
             url = None
 
         status = qualys_status_from_text(card_text)
