@@ -1,88 +1,97 @@
 import os
 import requests
-import time
-from datetime import datetime, timedelta
+import datetime
 from selenium import webdriver
 from selenium.webdriver.chrome.options import Options
-from selenium.webdriver.common.by import By
 from selenium.webdriver.chrome.service import Service
+from bs4 import BeautifulSoup
+import time
 
-# Función para iniciar el navegador con Selenium
+TELEGRAM_TOKEN = os.environ.get("TELEGRAM_TOKEN")
+TELEGRAM_CHAT_ID = os.environ.get("TELEGRAM_CHAT_ID")
+TEAMS_WEBHOOK_URL = os.environ.get("TEAMS_WEBHOOK_URL")
+
+def enviar_telegram(mensaje):
+    if not TELEGRAM_TOKEN or not TELEGRAM_CHAT_ID:
+        print("❌ Variables de entorno para Telegram no configuradas correctamente.")
+        return
+    url = f"https://api.telegram.org/bot{TELEGRAM_TOKEN}/sendMessage"
+    payload = {
+        "chat_id": TELEGRAM_CHAT_ID,
+        "text": mensaje,
+        "parse_mode": "HTML"
+    }
+    response = requests.post(url, json=payload)
+    print("Telegram:", response.text)
+
+def enviar_teams(mensaje):
+    if not TEAMS_WEBHOOK_URL:
+        print("❌ Variable de entorno TEAMS_WEBHOOK_URL no configurada.")
+        return
+    data = {
+        "@type": "MessageCard",
+        "@context": "http://schema.org/extensions",
+        "summary": "Estado de Netskope",
+        "themeColor": "0076D7",
+        "title": "Actualización de estado de Netskope",
+        "text": mensaje
+    }
+    r = requests.post(TEAMS_WEBHOOK_URL, json=data)
+    print("Teams:", r.text)
+
 def iniciar_driver():
     chrome_options = Options()
     chrome_options.add_argument("--headless=new")
     chrome_options.add_argument("--no-sandbox")
     chrome_options.add_argument("--disable-dev-shm-usage")
+    chrome_options.add_argument("--disable-gpu")
+    chrome_options.add_argument("--remote-debugging-port=9222")
     chrome_options.binary_location = "/usr/bin/chromium-browser"
+
     service = Service("/usr/local/bin/chromedriver")
     return webdriver.Chrome(service=service, options=chrome_options)
 
-# Extrae incidentes desde el sitio Netskope
-def obtener_incidentes(driver):
-    url = "https://www.netskope.com/company/network-status"
-    driver.get(url)
-    time.sleep(5)  # esperar carga completa
-
-    incidentes = []
-    contenedores = driver.find_elements(By.CSS_SELECTOR, ".incident-container")
-
-    for cont in contenedores:
-        try:
-            fecha_raw = cont.find_element(By.CSS_SELECTOR, ".incident-date").text.strip()
-            resumen = cont.find_element(By.CSS_SELECTOR, ".incident-summary").text.strip()
-            estado = cont.find_element(By.CSS_SELECTOR, ".incident-status").text.strip()
-
-            # Parsear fecha con formato correcto
-            fecha = datetime.strptime(fecha_raw, "%B %d, %Y")
-
-            if fecha >= datetime.now() - timedelta(days=15):
-                incidentes.append(f"📅 {fecha.strftime('%Y-%m-%d')} | {estado} | {resumen}")
-        except Exception as e:
-            print(f"Error al procesar incidente: {e}")
-
-    return incidentes
-
-# Enviar resumen a Telegram
-def enviar_telegram(mensaje):
-    token = os.getenv("TELEGRAM_TOKEN")
-    chat_id = os.getenv("TELEGRAM_CHAT_ID")
-
-    if not token or not chat_id:
-        print("❌ Variables de entorno TELEGRAM_TOKEN o TELEGRAM_CHAT_ID no definidas.")
-        return
-
-    url = f"https://api.telegram.org/bot{token}/sendMessage"
-    payload = {"chat_id": chat_id, "text": mensaje}
-
-    r = requests.post(url, json=payload)
-    print("Telegram:", r.text)
-
-# Enviar resumen a Teams
-def enviar_teams(mensaje):
-    webhook = os.getenv("TEAMS_WEBHOOK_URL")
-    if not webhook:
-        print("❌ Variable de entorno TEAMS_WEBHOOK_URL no definida.")
-        return
-
-    data = {"text": mensaje}
-    r = requests.post(webhook, json=data)
-    print("Teams:", r.text)
-
-# Función principal
-def main():
+def analizar_netskope():
     print("🔍 Iniciando análisis de Netskope...")
     driver = iniciar_driver()
-    incidentes = obtener_incidentes(driver)
+    url = "https://trustportal.netskope.com/incidents"
+    driver.get(url)
+    time.sleep(5)
+    soup = BeautifulSoup(driver.page_source, "html.parser")
     driver.quit()
 
-    if incidentes:
-        resumen = "🚨 Incidentes detectados en Netskope en los últimos 15 días:\n" + "\n".join(incidentes)
-    else:
-        resumen = "✅ No se han detectado incidentes en Netskope en los últimos 15 días."
+    incidents = soup.select("div.incident-item")
+    if not incidents:
+        return "✅ No hay incidentes activos de Netskope."
 
-    print(resumen)
-    enviar_telegram(resumen)
-    enviar_teams(resumen)
+    resumen = "🛑 <b>Incidentes recientes de Netskope (últimos 15 días):</b>\n\n"
+    ahora = datetime.datetime.utcnow()
+
+    for incident in incidents:
+        fecha_texto = incident.select_one("span.date").text.strip()
+        titulo = incident.select_one("div.title").text.strip()
+        estado = incident.select_one("span.status").text.strip()
+
+        try:
+            fecha = datetime.datetime.strptime(fecha_texto, "%b %d, %Y")
+        except ValueError:
+            continue
+
+        if (ahora - fecha).days <= 15:
+            resumen += f"• <b>{titulo}</b>\n📅 {fecha.strftime('%Y-%m-%d')}\n📌 Estado: {estado}\n\n"
+
+    if resumen.strip().endswith(":</b>"):
+        return "✅ No hay incidentes recientes en Netskope."
+
+    return resumen
+
+def main():
+    resumen = analizar_netskope()
+    if resumen:
+        enviar_telegram(resumen)
+        enviar_teams(resumen)
+    else:
+        print("✅ Sin novedades que reportar.")
 
 if __name__ == "__main__":
     main()
