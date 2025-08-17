@@ -188,10 +188,12 @@ def summarize_today(records):
     lines.sort(reverse=True)
     return {"count": len(lines), "items": lines}
 
-# ---------- Runner ----------
+# ---------- Runner (una sola notificación combinada) ----------
 def run():
     driver = start_driver()
     try:
+        sections = []
+
         for site in SITES:
             name = site["name"]
             url = site["url"]
@@ -214,12 +216,8 @@ def run():
             records = parse_ssp_records_for_product(html, product)
             today = summarize_today(records)
 
-            # Construye SIEMPRE un mensaje por cada consola
-            lines = [
-                f"Trend Micro - {name} - Status",
-                now_utc_str(),
-                ""
-            ]
+            # Sección por consola (siempre)
+            lines = [f"[{name}]"]
             if today["count"] > 0:
                 lines.append(f"Incidents today — {today['count']} incident(s)")
                 lines.extend(today["items"])
@@ -229,15 +227,23 @@ def run():
                 lines.append("Incidents today")
                 lines.append(f"- {no_msg}")
 
-            msg = "\n".join(lines)
+            sections.append("\n".join(lines))
 
-            print(f"\n===== {name.upper()} =====")
-            print(msg)
-            print("==========================\n")
+        # ÚNICO mensaje para ambas consolas
+        msg_lines = [
+            "Trend Micro - Status",
+            now_utc_str(),
+            ""
+        ]
+        msg_lines.append("\n\n".join(sections))
+        msg = "\n".join(msg_lines)
 
-            # Enviar notificación individual por consola
-            send_telegram(msg)
-            send_teams(msg)
+        print("\n===== TREND MICRO (COMBINED) =====")
+        print(msg)
+        print("==================================\n")
+
+        send_telegram(msg)
+        send_teams(msg)
 
     except Exception as e:
         print(f"[trendmicro] ERROR: {e}")
