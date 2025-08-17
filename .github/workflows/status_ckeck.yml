@@ -9,9 +9,9 @@ jobs:
   monitor:
     runs-on: ubuntu-latest
     strategy:
-      fail-fast: false
-      matrix:
-        vendor: [netskope]  # agrega más: [netskope, zscaler, paloalto]
+  fail-fast: false
+  matrix:
+    vendor: [netskope, proofpoint]
     env:
       TELEGRAM_BOT_TOKEN: ${{ secrets.TELEGRAM_BOT_TOKEN }}
       TELEGRAM_USER_ID:   ${{ secrets.TELEGRAM_USER_ID }}
