@@ -1,30 +1,32 @@
 import os
+import requests
 
-def main():
-    print("🔍 Enviando mensaje de prueba a Telegram...")
+def enviar_telegram(mensaje):
+    TELEGRAM_TOKEN = os.getenv("TELEGRAM_BOT_TOKEN")
+    TELEGRAM_CHAT_ID = os.getenv("TELEGRAM_USER_ID")
 
-    token = os.getenv("TELEGRAM_TOKEN")
-    chat_id = os.getenv("TELEGRAM_CHAT_ID")
-
-    if not token or not chat_id:
+    if not TELEGRAM_TOKEN or not TELEGRAM_CHAT_ID:
         print("❌ Variables de entorno para Telegram no configuradas.")
-        print(f"TELEGRAM_TOKEN: {token}")
-        print(f"TELEGRAM_CHAT_ID: {chat_id}")
+        print(f"TELEGRAM_TOKEN: {TELEGRAM_TOKEN}")
+        print(f"TELEGRAM_CHAT_ID: {TELEGRAM_CHAT_ID}")
         return
 
-    print("✅ Variables cargadas correctamente.")
-    print(f"TELEGRAM_TOKEN: {token}")
-    print(f"TELEGRAM_CHAT_ID: {chat_id}")
+    url = f"https://api.telegram.org/bot{TELEGRAM_TOKEN}/sendMessage"
+    data = {
+        "chat_id": TELEGRAM_CHAT_ID,
+        "text": mensaje
+    }
 
-    url = f"https://api.telegram.org/bot{token}/sendMessage"
-    data = {"chat_id": chat_id, "text": "✅ Mensaje de prueba desde GitHub Actions"}
-    
     try:
-        import requests
-        response = requests.post(url, data=data)
-        print("Telegram:", response.status_code, response.text)
+        response = requests.post(url, json=data)
+        if response.status_code == 200:
+            print("✅ Mensaje enviado a Telegram correctamente.")
+        else:
+            print(f"❌ Error al enviar mensaje a Telegram. Código: {response.status_code}")
+            print(response.text)
     except Exception as e:
-        print("❌ Error al enviar mensaje:", str(e))
+        print(f"❌ Excepción al enviar mensaje a Telegram: {e}")
 
 if __name__ == "__main__":
-    main()
+    print("🔍 Enviando mensaje de prueba a Telegram...")
+    enviar_telegram("📢 Esto es un mensaje de prueba desde GitHub Actions.")
