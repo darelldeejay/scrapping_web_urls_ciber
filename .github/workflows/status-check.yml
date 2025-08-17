@@ -1,34 +1,37 @@
-name: Status Monitor - Netskope
+name: Verificar estado de fabricantes
 
 on:
   workflow_dispatch:
+  schedule:
+    - cron: '0 9 * * *'  # Todos los días a las 9:00 UTC
 
 jobs:
-  run-scraper:
+  ejecutar-monitor:
     runs-on: ubuntu-latest
 
+    env:
+      TELEGRAM_TOKEN: ${{ secrets.TELEGRAM_TOKEN }}
+      TELEGRAM_CHAT_ID: ${{ secrets.TELEGRAM_CHAT_ID }}
+      TEAMS_WEBHOOK: ${{ secrets.TEAMS_WEBHOOK }}
+
     steps:
-    - name: Checkout repo
-      uses: actions/checkout@v4
+      - name: Clonar repositorio
+        uses: actions/checkout@v4
 
-    - name: Set up Python
-      uses: actions/setup-python@v4
-      with:
-        python-version: "3.10"
+      - name: Configurar Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.10'
 
-    - name: Install dependencies
-      run: |
-        python -m pip install --upgrade pip
-        pip install -r requirements.txt
+      - name: Instalar dependencias
+        run: |
+          pip install -r requirements.txt
 
-    - name: Install Chromium and Chromedriver
-      run: |
-        sudo apt-get update
-        sudo apt-get install -y chromium-browser chromium-chromedriver
-        which chromium || echo "chromium not found"
-        which chromedriver || echo "chromedriver not found"
-        echo "Chromium: $(chromium --version)"
-        echo "Chromedriver: $(chromedriver --version)"
+      - name: Instalar Chromium y Chromedriver
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y chromium-browser chromium-chromedriver
+          sudo ln -sf /usr/lib/chromium-browser/chromedriver /usr/bin/chromedriver
 
-    - name: Run script
-      run: python main.py
+      - name: Ejecutar script principal
+        run: python main.py
