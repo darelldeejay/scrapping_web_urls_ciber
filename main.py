@@ -4,11 +4,12 @@ from selenium import webdriver
 from selenium.webdriver.chrome.options import Options
 from selenium.webdriver.common.by import By
 import requests
+from shutil import which
 
-
+# === CONFIGURACIÓN ===
 TELEGRAM_TOKEN = "TU_TOKEN"
 TELEGRAM_CHAT_ID = "TU_CHAT_ID"
-TEAMS_WEBHOOK_URL = "TU_WEBHOOK"  # O déjalo vacío si no usas Teams
+TEAMS_WEBHOOK_URL = "TU_WEBHOOK"  # opcional
 
 URL_NETSKOPE = "https://trust.netskope.com/"
 
@@ -17,7 +18,10 @@ def iniciar_driver():
     options.add_argument("--headless=new")
     options.add_argument("--disable-dev-shm-usage")
     options.add_argument("--no-sandbox")
-    options.binary_location = "/snap/bin/chromium"
+    options.add_argument("--user-data-dir=/tmp/chrome-data")  # evitar conflicto de perfiles
+    options.binary_location = (
+        which("chromium-browser") or which("chromium") or which("google-chrome")
+    )
     return webdriver.Chrome(options=options)
 
 def analizar_netskope(driver):
@@ -25,10 +29,14 @@ def analizar_netskope(driver):
     driver.get(URL_NETSKOPE)
     time.sleep(3)
 
-    # Navegar a "Incidents"
-    incidents_tab = driver.find_element(By.LINK_TEXT, "Incidents")
-    incidents_tab.click()
-    time.sleep(3)
+    # Ir a la pestaña "Incidents"
+    try:
+        incidents_tab = driver.find_element(By.LINK_TEXT, "Incidents")
+        incidents_tab.click()
+        time.sleep(3)
+    except Exception as e:
+        print("❌ No se pudo acceder a la pestaña Incidents:", e)
+        return "⚠️ Error al acceder a la sección de incidentes de Netskope."
 
     # Buscar secciones de incidentes pasados
     incidentes = driver.find_elements(By.CSS_SELECTOR, ".past-incidents .incidents-list > div")
@@ -36,7 +44,6 @@ def analizar_netskope(driver):
     resumen = "📊 *Resumen de incidentes Netskope (últimos 15 días)*\n"
     if not incidentes:
         resumen += "✅ No hay incidentes reportados en los últimos 15 días."
-        print(resumen)
         return resumen
 
     encontrados = False
@@ -55,7 +62,6 @@ def analizar_netskope(driver):
 
     if not encontrados:
         resumen += "✅ No hay incidentes reportados en los últimos 15 días."
-    print(resumen)
     return resumen
 
 def enviar_telegram(mensaje):
