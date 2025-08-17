@@ -248,7 +248,7 @@ def parse_incidents_today(soup: BeautifulSoup):
 
     return {"date": date_str, "count": len(items), "items": items or ["- (No details)"]}
 
-# ---------- Formato mensaje (con Overall status solo aquí) ----------
+# ---------- Formato mensaje (sin repetir fecha; ocultar “— 0 incident(s)”) ----------
 
 def format_message(components, today_inc):
     lines = [
@@ -279,10 +279,12 @@ def format_message(components, today_inc):
     else:
         lines.append("- All components Operational")
 
-    # Incidents today (only today)
+    # Incidents today (no date duplication; hide “— 0 incident(s)”)
     lines.append("")
-    lines.append("Incidents today")
-    lines.append(f"{today_inc.get('date', 'Today')} — {today_inc.get('count', 0)} incident(s)")
+    if today_inc.get("count", 0) > 0:
+        lines.append(f"Incidents today — {today_inc['count']} incident(s)")
+    else:
+        lines.append("Incidents today")
     for line in (today_inc.get("items") or ["- No incidents reported today."]):
         lines.append(line)
 
