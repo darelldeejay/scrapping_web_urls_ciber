@@ -225,42 +225,51 @@ def cards_in_container(container: BeautifulSoup):
 def extract_sections_strict(soup: BeautifulSoup):
     """
     Devuelve (cards_open, cards_past) separando por headings.
-    Recorremos TODOS los next_siblings del heading de 'Past' hasta topar
-    con otro heading “grande”, acumulando tarjetas en el camino.
+    Recorremos TODOS los elementos después del heading correspondiente
+    hasta topar con un heading “grande” de otra sección.
+    Además, si 'past' queda vacío, hacemos un fallback global.
     """
-    # Open = estricto
-    open_container = find_section_container(
-        soup,
-        ["Open Incidents", "Active Incidents", "Active", "Current incidents"]
-    )
-    open_cards = cards_in_container(open_container) if open_container else []
+    def find_heading(keywords):
+        for kw in keywords:
+            h = soup.find(
+                lambda tag: tag.name in ["h1","h2","h3","h4","div","summary"]
+                and tag.get_text(strip=True)
+                and kw.lower() in tag.get_text(strip=True).lower()
+            )
+            if h:
+                return h
+        return None
 
-    # Past = heading + barrido de siblings
-    past_heading = None
-    for kw in ["Past Incidents (Previous 15 days)", "Past Incidents", "Previous 15 days"]:
-        past_heading = soup.find(
-            lambda tag: tag.name in ["h1", "h2", "h3", "h4", "div", "summary"]
-            and tag.get_text(strip=True)
-            and kw.lower() in tag.get_text(strip=True).lower()
-        )
-        if past_heading:
-            break
-
-    past_cards = []
-    if past_heading:
-        for sib in past_heading.next_siblings:
-            if not hasattr(sib, "get_text"):
-                continue
-            if sib.name in ["h1", "h2", "h3", "h4", "summary"]:
-                txt = sib.get_text(strip=True).lower()
-                if any(x in txt for x in ["open incidents", "maintenance", "status", "home"]):
+    def collect_after(heading, stop_keywords):
+        cards = []
+        if not heading:
+            return cards
+        for node in heading.find_all_next(True):
+            # si encontramos otro heading “grande” que indique otra sección, paramos
+            if node.name in ["h1","h2","h3","h4","summary"]:
+                txt = node.get_text(strip=True).lower()
+                if any(sk in txt for sk in stop_keywords):
                     break
-            past_cards.extend(sib.select(".incident, [class*='incident'], a[href*='/incidents/']"))
+            # recoge posibles tarjetas/enlaces dentro del nodo
+            cards.extend(node.select(".incident, [class*='incident'], a[href*='/incidents/']"))
+        return cards
 
-        # Fallback suave
-        if not past_cards:
-            cont = past_heading.find_next_sibling()
-            past_cards = cards_in_container(cont)
+    open_heading = find_heading(["Open Incidents", "Active Incidents", "Active", "Current incidents"])
+    past_heading = find_heading(["Past Incidents (Previous 15 days)", "Past Incidents", "Previous 15 days"])
+
+    open_cards = collect_after(open_heading, ["past incidents", "previous 15 days", "maintenance", "status", "home"])
+    past_cards = collect_after(past_heading, ["open incidents", "maintenance", "status", "home"])
+
+    # Fallback prudente: si no encontramos past_cards, tomamos todos los anchors de incidentes
+    # y les restamos los que ya pertenecen a "open".
+    if not past_cards:
+        all_anchors = soup.select("a[href*='/incidents/']")
+        open_hrefs = set()
+        for c in open_cards:
+            a = c if c.name == "a" else c.find("a", href=True)
+            if a and "/incidents" in a.get("href", ""):
+                open_hrefs.add(a["href"])
+        past_cards = [a for a in all_anchors if a.get("href") not in open_hrefs]
 
     return open_cards, past_cards
 
@@ -288,32 +297,37 @@ def normalize_card(card) -> dict:
     """
     text = card.get_text(separator=" ", strip=True)
     url = None
-    a = card.find("a", href=True)
-    if a and "/incidents" in a["href"]:
-        url = a["href"]
-        if url.startswith("/"):
-            url = "https://trustportal.netskope.com" + url
 
-    # Título
-    title = None
-    for cls in ["incident-title", "title", "card-title"]:
-        el = card.find(class_=re.compile(cls, re.I))
-        if el:
-            title = el.get_text(strip=True)
-            break
-    if not title:
-        h = card.find(["h1", "h2", "h3", "h4"])
-        if h:
-            title = h.get_text(strip=True)
-    if not title:
-        title = " ".join((text or "").split()[:14]) or "Netskope Incident"
+    # Si el propio nodo es un <a>, úsalo
+    if getattr(card, "name", None) == "a" and card.get("href"):
+        href = card.get("href")
+        url = "https://trustportal.netskope.com" + href if href.startswith("/") else href
+        title = card.get_text(strip=True) or "Netskope Incident"
+    else:
+        a = card.find("a", href=True)
+        if a and "/incidents" in a.get("href", ""):
+            href = a["href"]
+            url = "https://trustportal.netskope.com" + href if href.startswith("/") else href
+        # Título
+        title = None
+        for cls in ["incident-title", "title", "card-title"]:
+            el = card.find(class_=re.compile(cls, re.I))
+            if el:
+                title = el.get_text(strip=True)
+                break
+        if not title:
+            h = card.find(["h1", "h2", "h3", "h4"])
+            if h:
+                title = h.get_text(strip=True)
+        if not title:
+            title = " ".join((text or "").split()[:14]) or "Netskope Incident"
 
     # Fechas
     started_at = None
     ended_at = None
 
     # <time> tags
-    times = card.find_all("time")
+    times = card.find_all("time") if hasattr(card, "find_all") else []
     parsed_times = []
     for t in times:
         dt = parse_datetime_any(t.get("datetime") or t.get_text(strip=True))
@@ -381,6 +395,15 @@ def analizar_netskope(driver: webdriver.Chrome) -> tuple[list[dict], list[dict]]
     )
 
     expandir_past_incidents(driver)
+
+    # Espera a que aparezca al menos un enlace de incidente en el DOM
+    try:
+        WebDriverWait(driver, 10).until(
+            EC.presence_of_element_located((By.CSS_SELECTOR, "a[href*='/incidents/']"))
+        )
+    except Exception:
+        pass
+
     time.sleep(2)
 
     html = driver.page_source
