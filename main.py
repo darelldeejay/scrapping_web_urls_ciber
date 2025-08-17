@@ -26,4 +26,4 @@ def enviar_telegram(mensaje):
 
 # Prueba
 print("🔍 Enviando mensaje de prueba a Telegram...")
-enviar_mensaje_telegram("🔔 Prueba de notificación desde script de test")
+enviar_telegram("🔔 Prueba de notificación desde script de test")
