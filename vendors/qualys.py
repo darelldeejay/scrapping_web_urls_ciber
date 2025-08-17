@@ -2,7 +2,7 @@
 import os
 import re
 import traceback
-from datetime import datetime, timedelta, timezone
+from datetime import datetime, timezone
 
 from bs4 import BeautifulSoup
 from dateutil import parser as dateparser
@@ -12,14 +12,14 @@ from selenium.webdriver.support import expected_conditions as EC
 
 from common.browser import start_driver
 from common.notify import send_telegram, send_teams
-from common.format import header, render_incidents
+from common.format import header
 
 URL = "https://status.qualys.com/history?filter=8f7fjwhmd4n0"
 SAVE_HTML = os.getenv("SAVE_HTML", "0") == "1"
-LOOKBACK_DAYS = 15
 
 MONTHS = "Jan|Feb|Mar|Apr|May|Jun|Jul|Aug|Sep|Oct|Nov|Dec|Ene|Feb|Mar|Abr|May|Jun|Jul|Ago|Sep|Oct|Nov|Dic"
-# Ejemplos de la página:
+
+# Ejemplos:
 # "Aug 11, 10:01 - 14:00 PDT"
 # "Jul 7, 22:31 - Jul 8, 06:30 PDT"
 DATE_LINE_RE = re.compile(
@@ -28,8 +28,8 @@ DATE_LINE_RE = re.compile(
 )
 MONTH_YEAR_RE = re.compile(rf"\b({MONTHS})\s+(\d{{4}})\b", re.I)
 
+
 def wait_for_page(driver):
-    # Esperamos a que cargue algo representativo (botón de filtro o tarjetas con enlaces)
     targets = [
         (By.XPATH, "//*[contains(., 'Filter Components')]"),
         (By.XPATH, "//*[contains(., 'Subscribe To Updates')]"),
@@ -43,24 +43,23 @@ def wait_for_page(driver):
             continue
     WebDriverWait(driver, 20).until(EC.presence_of_element_located((By.CSS_SELECTOR, "body")))
 
+
 def parse_dt_utc(s: str):
     try:
         dt = dateparser.parse(s, fuzzy=True)
         if not dt:
             return None
         if dt.tzinfo is None:
-            # Si no trae tz, asumimos UTC
             dt = dt.replace(tzinfo=timezone.utc)
         return dt.astimezone(timezone.utc)
     except Exception:
         return None
 
+
 def nearest_month_year(node):
-    """Busca el h2/h3 'August 2025' más cercano hacia arriba/atrás."""
+    """Busca el 'August 2025' más cercano hacia arriba/atrás para completar el año en líneas sin año."""
     cur = node
-    # 1) mirar ancestros y hermanos previos
     for _ in range(10):
-        # hermanos previos
         sib = getattr(cur, "previous_sibling", None)
         while sib:
             if getattr(sib, "get_text", None):
@@ -69,7 +68,6 @@ def nearest_month_year(node):
                 if m:
                     return m.group(1), int(m.group(2))
             sib = getattr(sib, "previous_sibling", None)
-        # ancestro
         cur = getattr(cur, "parent", None)
         if not cur:
             break
@@ -80,7 +78,8 @@ def nearest_month_year(node):
                 return m.group(1), int(m.group(2))
     return None, None
 
-def parse_date_range(line_text: str, node_for_context) -> tuple:
+
+def parse_date_range(line_text: str, node_for_context):
     """
     Convierte:
         'Aug 11, 10:01 - 14:00 PDT'
@@ -91,26 +90,21 @@ def parse_date_range(line_text: str, node_for_context) -> tuple:
     if not m:
         return None, None
 
-    # tz va al final; si no aparece, lo intenta dateutil igualmente
     tz = m.group(3) or "UTC"
     left = line_text[: m.end()].split("-")[0].strip().rstrip(",")
     right = line_text[: m.end()].split("-")[1].strip()
 
-    # ¿Tenemos año contextual?
     mon_ctx, year_ctx = nearest_month_year(node_for_context)
 
-    # Normalizamos cadenas start/end
     start_str = left
     if not re.search(r"\b(UTC|GMT|[A-Z]{2,4})\b", start_str, flags=re.I):
         start_str += f" {tz}"
     if year_ctx and not re.search(r"\b\d{4}\b", start_str):
         start_str += f" {year_ctx}"
 
-    # right puede tener solo hora o fecha+hora
     if re.search(rf"\b({MONTHS})\s+\d{{1,2}},", right, flags=re.I):
         end_str = right
     else:
-        # reutilizamos mes/día de 'left'
         md = re.match(rf"\b({MONTHS})\s+(\d{{1,2}}),\s*\d{{1,2}}:\d{{2}}", left, flags=re.I)
         if md:
             end_str = f"{md.group(1)} {md.group(2)}, {right}"
@@ -123,8 +117,9 @@ def parse_date_range(line_text: str, node_for_context) -> tuple:
 
     return parse_dt_utc(start_str), parse_dt_utc(end_str)
 
+
 def is_card_container(node):
-    """Heurística: un contenedor de tarjeta suele tener un <a> de título y una línea con fecha."""
+    """Heurística: un contenedor de tarjeta tiene un <a> de título y una línea de fecha."""
     if not getattr(node, "get_text", None):
         return False
     txt = node.get_text(" ", strip=True)
@@ -132,8 +127,8 @@ def is_card_container(node):
     has_link = bool(node.select("a[href]"))
     return has_date and has_link
 
+
 def collect_cards(soup: BeautifulSoup):
-    # Buscar bloques candidatos (divs con un <a> y una línea de fecha)
     cards = []
     for div in soup.find_all("div"):
         try:
@@ -141,7 +136,6 @@ def collect_cards(soup: BeautifulSoup):
                 cards.append(div)
         except Exception:
             continue
-    # fallback: si no encontró, usa anchors visibles con fecha en ancestros cercanos
     if not cards:
         for a in soup.select("a[href]"):
             parent = a
@@ -154,41 +148,55 @@ def collect_cards(soup: BeautifulSoup):
                     break
     return cards
 
+
+def qualys_status_from_text(text: str) -> str:
+    """
+    Estados propios de esta vista de histórico:
+    - 'This incident has been resolved.' -> Resolved
+    - 'has been mitigated' -> Mitigated
+    - 'service disruption'/'degraded'/'impact' sin resolver -> Incident
+    - Por defecto -> Update
+    """
+    low = (text or "").lower()
+    if "has been resolved" in low or re.search(r"\bresolved\b", low):
+        return "Resolved"
+    if "has been mitigated" in low or "mitigated" in low:
+        return "Mitigated"
+    if "service disruption" in low or "degraded" in low or "impact" in low:
+        return "Incident"
+    return "Update"
+
+
 def extract_incidents(cards):
     incidents = []
     for card in cards:
-        # Título del anchor principal
+        # Anchor principal (título)
         a = None
         for cand in card.select("a[href]"):
             t = cand.get_text(" ", strip=True) or ""
-            # ignorar navegación conocida
-            if re.search(r"Subscribe To Updates|Support|Filter Components|Proofpoint|Qualys|Login|Log in|Terms|Privacy|Guest", t, re.I):
+            if re.search(r"Subscribe To Updates|Support|Filter Components|Qualys|Login|Log in|Terms|Privacy|Guest", t, re.I):
                 continue
-            # el título de evento suele ser el anchor más largo
             if not a or len(t) > len(a.get_text(" ", strip=True) or ""):
                 a = cand
         if not a:
             continue
 
         title = a.get_text(" ", strip=True)
-        if title.startswith("[Scheduled]"):
-            # pedido: ignorar todo lo programado
-            continue
 
-        # Estado: si viene entre corchetes iniciales (p.ej., [Investigating]), tómalo. Si no, 'Update'
-        m_br = re.match(r"\[(.*?)\]\s*(.+)", title)
-        status = "Update"
-        if m_br and m_br.group(1).strip():
-            status = m_br.group(1).strip()
-            title = m_br.group(2).strip()
+        # IGNORAR todo lo programado
+        card_text = card.get_text("\n", strip=True)
+        if title.startswith("[Scheduled]") or "[Scheduled]" in card_text or "scheduled maintenance" in card_text.lower():
+            continue
 
         href = a.get("href", "")
         url = href if href.startswith("http") else f"https://status.qualys.com{href}" if href.startswith("/") else href
 
-        # Línea de fecha dentro del card
-        card_text = card.get_text("\n", strip=True)
-        m_line = DATE_LINE_RE.search(card_text or "")
+        # Estado propio de esta vista
+        status = qualys_status_from_text(card_text)
+
+        # Línea de fecha
         started_at = ended_at = None
+        m_line = DATE_LINE_RE.search(card_text or "")
         if m_line:
             date_line = m_line.group(0)
             started_at, ended_at = parse_date_range(date_line, card)
@@ -202,6 +210,7 @@ def extract_incidents(cards):
             "raw_text": card_text,
         })
     return incidents
+
 
 def analizar_qualys(driver):
     driver.get(URL)
@@ -220,25 +229,44 @@ def analizar_qualys(driver):
     cards = collect_cards(soup)
     items = extract_incidents(cards)
 
-    # History → tratamos todo como “pasados”; filtramos por 15 días
-    now = datetime.utcnow().replace(tzinfo=timezone.utc)
-    cutoff = now - timedelta(days=LOOKBACK_DAYS)
+    # Esta URL es de histórico: devolvemos TODO lo visible (sin filtro de días)
+    # Ordenamos por fecha (fin -> inicio -> título) descendente
+    def sort_key(i):
+        return (
+            i.get("ended_at") or i.get("started_at") or datetime.min.replace(tzinfo=timezone.utc),
+            i.get("title") or "",
+        )
+    items_sorted = sorted(items, key=sort_key, reverse=True)
+    return items_sorted
 
-    def in_lookback(inc):
-        dt = inc.get("ended_at") or inc.get("started_at")
-        if not dt:
-            return True  # si no hay fecha, lo consideramos dentro
-        return dt >= cutoff
 
-    pasados_15 = [i for i in items if in_lookback(i)]
-    activos = []  # esta URL es de histórico; los activos van en otra vista
-    return activos, pasados_15
+def format_message(items):
+    lines = [header("Qualys"), "\n<b>Histórico (meses visibles en la página)</b>"]
+    if not items:
+        lines.append("\n- No hay incidencias no programadas en los meses mostrados.")
+        return "\n".join(lines)
+
+    for idx, inc in enumerate(items, 1):
+        t = inc.get("title") or "Sin título"
+        u = inc.get("url")
+        st = inc.get("status") or "Update"
+        sdt = inc.get("started_at")
+        edt = inc.get("ended_at")
+        s_s = sdt.strftime("%Y-%m-%d %H:%M UTC") if sdt else "N/D"
+        e_s = edt.strftime("%Y-%m-%d %H:%M UTC") if edt else "N/D"
+        title_line = f"{idx}. {t}"
+        if u:
+            title_line = f'{idx}. <a href="{u}">{t}</a>'
+        lines.append(title_line)
+        lines.append(f"   Estado: {st} · Inicio: {s_s} · Fin: {e_s}")
+    return "\n".join(lines)
+
 
 def run():
     driver = start_driver()
     try:
-        activos, pasados = analizar_qualys(driver)
-        resumen = header("Qualys") + "\n" + render_incidents(activos, pasados)
+        items = analizar_qualys(driver)
+        resumen = format_message(items)
         print("\n===== QUALYS =====")
         print(resumen)
         print("==================\n")
