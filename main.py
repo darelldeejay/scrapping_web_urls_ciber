@@ -1,92 +1,121 @@
-import time
 import os
+import time
 from datetime import datetime, timedelta
+import requests
 from selenium import webdriver
 from selenium.webdriver.chrome.options import Options
 from selenium.webdriver.common.by import By
-import requests
-from shutil import which
 
-# === CONFIGURACIÓN DESDE VARIABLES DE ENTORNO ===
-TELEGRAM_TOKEN = os.getenv("TELEGRAM_TOKEN")
-TELEGRAM_CHAT_ID = os.getenv("TELEGRAM_CHAT_ID")
-TEAMS_WEBHOOK_URL = os.getenv("TEAMS_WEBHOOK", "")
+# Obtener las variables de entorno reales
+TELEGRAM_TOKEN = os.getenv("TELEGRAM_BOT_TOKEN")
+CHAT_ID = os.getenv("TELEGRAM_USER_ID")
+TEAMS_WEBHOOK_URL = os.getenv("TEAMS_WEBHOOK_URL")
 
 URL_NETSKOPE = "https://trust.netskope.com/"
 
 def iniciar_driver():
-    options = Options()
-    options.add_argument("--headless=new")
-    options.add_argument("--disable-dev-shm-usage")
-    options.add_argument("--no-sandbox")
-    options.add_argument("--user-data-dir=/tmp/chrome-data")
-    options.binary_location = (
-        which("chromium-browser") or which("chromium") or which("google-chrome")
-    )
-    return webdriver.Chrome(options=options)
+    chrome_options = Options()
+    chrome_options.add_argument("--headless=new")
+    chrome_options.add_argument("--no-sandbox")
+    chrome_options.add_argument("--disable-dev-shm-usage")
+    chrome_options.add_argument("--disable-gpu")
+    chrome_options.add_argument("--disable-extensions")
+    chrome_options.add_argument("--window-size=1920,1080")
+    return webdriver.Chrome(options=chrome_options)
 
-def analizar_netskope(driver):
-    print("🔍 Iniciando análisis de Netskope...")
+def obtener_incidentes_netskope(driver):
     driver.get(URL_NETSKOPE)
-    time.sleep(3)
+    time.sleep(2)
 
     try:
         incidents_tab = driver.find_element(By.LINK_TEXT, "Incidents")
         incidents_tab.click()
-        time.sleep(3)
+        time.sleep(2)
     except Exception as e:
-        print("❌ No se pudo acceder a la pestaña Incidents:", e)
-        return "⚠️ Error al acceder a la sección de incidentes de Netskope."
+        print("No se pudo acceder a la pestaña Incidents:", e)
+        return []
 
-    incidentes = driver.find_elements(By.CSS_SELECTOR, ".past-incidents .incidents-list > div")
+    incidentes = []
 
-    resumen = "📊 *Resumen de incidentes Netskope (últimos 15 días)*\n"
-    if not incidentes:
-        resumen += "✅ No hay incidentes reportados en los últimos 15 días."
-        return resumen
+    try:
+        cards = driver.find_elements(By.CLASS_NAME, "card")  # contenedor de incidentes pasados
+        for card in cards:
+            try:
+                date_elem = card.find_element(By.TAG_NAME, "h4")
+                fecha_texto = date_elem.text.strip()
+                fecha = datetime.strptime(fecha_texto, "%b %d, %Y")
 
-    encontrados = False
-    for incidente in incidentes:
-        try:
-            fecha_texto = incidente.find_element(By.CSS_SELECTOR, "div:nth-child(1)").text.strip()
-            fecha_incidente = datetime.strptime(fecha_texto, "%b %d, %Y")
-            if fecha_incidente >= datetime.utcnow() - timedelta(days=15):
-                titulo = incidente.find_element(By.CSS_SELECTOR, ".incident-title").text.strip()
-                estado = incidente.find_element(By.CSS_SELECTOR, ".incident-status").text.strip()
-                resumen += f"\n🛑 *{titulo}*\n📅 Fecha: {fecha_texto}\n🔁 Estado: {estado}\n"
-                encontrados = True
-        except Exception:
-            continue
+                if fecha >= datetime.utcnow() - timedelta(days=15):
+                    titulo_elem = card.find_element(By.CSS_SELECTOR, "strong")
+                    estado_elem = card.find_element(By.CLASS_NAME, "status")
+                    detalle_elem = card.find_element(By.TAG_NAME, "p")
 
-    if not encontrados:
-        resumen += "✅ No hay incidentes reportados en los últimos 15 días."
-    return resumen
+                    incidentes.append({
+                        "fecha": fecha.strftime("%Y-%m-%d"),
+                        "titulo": titulo_elem.text.strip(),
+                        "estado": estado_elem.text.strip(),
+                        "detalle": detalle_elem.text.strip()
+                    })
+            except Exception as e:
+                continue
+    except Exception as e:
+        print("No se pudieron obtener los incidentes:", e)
 
-def enviar_telegram(mensaje):
-    if not TELEGRAM_TOKEN or not TELEGRAM_CHAT_ID:
-        print("⚠️ TELEGRAM_TOKEN o CHAT_ID no configurados.")
+    return incidentes
+
+def enviar_telegram(resumen):
+    if not TELEGRAM_TOKEN or not CHAT_ID:
+        print("⚠️ TELEGRAM_BOT_TOKEN o TELEGRAM_USER_ID no configurados.")
         return
     url = f"https://api.telegram.org/bot{TELEGRAM_TOKEN}/sendMessage"
     data = {
-        "chat_id": TELEGRAM_CHAT_ID,
-        "text": mensaje,
-        "parse_mode": "Markdown"
+        "chat_id": CHAT_ID,
+        "text": resumen,
+        "parse_mode": "HTML"
     }
-    response = requests.post(url, json=data)
-    print("Telegram:", response.text)
+    try:
+        r = requests.post(url, json=data)
+        print("Telegram:", r.text)
+    except Exception as e:
+        print("Error enviando mensaje a Telegram:", e)
 
-def enviar_teams(mensaje):
-    if not TEAMS_WEBHOOK_URL or not TEAMS_WEBHOOK_URL.startswith("http"):
-        print("⏭ Webhook de Teams no configurado.")
+def enviar_teams(resumen):
+    if not TEAMS_WEBHOOK_URL:
+        print("🛑 Webhook de Teams no configurado.")
         return
-    data = {"text": mensaje}
-    r = requests.post(TEAMS_WEBHOOK_URL, json=data)
-    print("Teams:", r.status_code)
+    data = {
+        "@type": "MessageCard",
+        "@context": "https://schema.org/extensions",
+        "summary": "Resumen de incidentes Netskope",
+        "themeColor": "0076D7",
+        "title": "📊 <b>Resumen de incidentes Netskope</b> (últimos 15 días)",
+        "text": resumen.replace("\n", "<br>")
+    }
+    try:
+        r = requests.post(TEAMS_WEBHOOK_URL, json=data)
+        print("Teams:", r.text)
+    except Exception as e:
+        print("Error enviando mensaje a Teams:", e)
+
+def formatear_resumen(incidentes):
+    if not incidentes:
+        return "✅ <i>No hay incidentes reportados en los últimos 15 días.</i>"
+    resumen = "🚨 <b>Incidentes detectados en Netskope:</b>\n\n"
+    for inc in incidentes:
+        resumen += f"📅 <b>{inc['fecha']}</b>\n"
+        resumen += f"🧾 <b>{inc['titulo']}</b>\n"
+        resumen += f"📌 Estado: {inc['estado']}\n"
+        resumen += f"🔎 {inc['detalle']}\n\n"
+    return resumen
 
 def main():
+    print("🔍 Iniciando análisis de Netskope...")
     driver = iniciar_driver()
-    resumen = analizar_netskope(driver)
+    incidentes = obtener_incidentes_netskope(driver)
     driver.quit()
+
+    resumen = formatear_resumen(incidentes)
+
     enviar_telegram(resumen)
     enviar_teams(resumen)
 
