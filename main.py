@@ -1,4 +1,4 @@
-import os
+import os 
 import requests
 from datetime import datetime, timedelta
 from selenium import webdriver
@@ -8,8 +8,8 @@ from bs4 import BeautifulSoup
 import time
 
 # Variables de entorno
-TELEGRAM_TOKEN = os.getenv("TELEGRAM_TOKEN")
-TELEGRAM_CHAT_ID = os.getenv("TELEGRAM_CHAT_ID")
+TELEGRAM_BOT_TOKEN = os.getenv("TELEGRAM_BOT_TOKEN")
+TELEGRAM_USER_ID = os.getenv("TELEGRAM_USER_ID")
 TEAMS_WEBHOOK_URL = os.getenv("TEAMS_WEBHOOK_URL")
 
 def iniciar_driver():
@@ -24,21 +24,24 @@ def iniciar_driver():
     return webdriver.Chrome(service=service, options=chrome_options)
 
 def enviar_telegram(mensaje):
-    if not TELEGRAM_TOKEN or not TELEGRAM_CHAT_ID:
+    if not TELEGRAM_BOT_TOKEN or not TELEGRAM_USER_ID:
         print("❌ Variables de entorno para Telegram no configuradas correctamente.")
+        print(f"TELEGRAM_BOT_TOKEN: {TELEGRAM_BOT_TOKEN}")
+        print(f"TELEGRAM_USER_ID: {TELEGRAM_USER_ID}")
         return
 
-    url = f"https://api.telegram.org/bot{TELEGRAM_TOKEN}/sendMessage"
+    url = f"https://api.telegram.org/bot{TELEGRAM_BOT_TOKEN}/sendMessage"
     data = {
-        "chat_id": TELEGRAM_CHAT_ID,
+        "chat_id": TELEGRAM_USER_ID,
         "text": mensaje
     }
 
     try:
         response = requests.post(url, data=data)
-        print(f"Telegram: {response.text}")
+        print(f"Telegram: {response.status_code}")
+        print(response.text)
     except Exception as e:
-        print(f"Error enviando a Telegram: {e}")
+        print(f"❌ Error enviando a Telegram: {e}")
 
 def enviar_teams(mensaje):
     if not TEAMS_WEBHOOK_URL:
@@ -58,7 +61,7 @@ def enviar_teams(mensaje):
         r = requests.post(TEAMS_WEBHOOK_URL, json=data)
         print(f"Teams: {r.status_code}")
     except Exception as e:
-        print(f"Error enviando a Teams: {e}")
+        print(f"❌ Error enviando a Teams: {e}")
 
 def analizar_netskope(driver):
     print("🔍 Iniciando análisis de Netskope...")
