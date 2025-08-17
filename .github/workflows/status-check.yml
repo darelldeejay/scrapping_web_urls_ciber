@@ -2,8 +2,8 @@ name: Status Monitor - Netskope
 
 on:
   schedule:
-    - cron: '*/30 * * * *'  # Cada 30 minutos (usa */15 si prefieres cada 15 min)
-  workflow_dispatch:       # Permite ejecutar manualmente
+    - cron: '*/30 * * * *'  # Cada 30 minutos
+  workflow_dispatch:
 
 jobs:
   run-scraper:
