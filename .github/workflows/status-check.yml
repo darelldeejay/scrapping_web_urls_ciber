@@ -1,9 +1,9 @@
-name: Netskope Status Check
+name: Status Check
 
 on:
-  schedule:
-    - cron: '0 8 * * *'  # Ejecuta todos los días a las 8 AM UTC
   workflow_dispatch:
+  schedule:
+    - cron: "0 * * * *"
 
 jobs:
   check-status:
@@ -16,25 +16,19 @@ jobs:
       - name: Set up Python
         uses: actions/setup-python@v4
         with:
-          python-version: '3.10'
+          python-version: 3.10
 
       - name: Install dependencies
-        run: pip install -r requirements.txt
+        run: |
+          pip install -r requirements.txt
 
-      - name: Install Chromium & matching chromedriver
+      - name: Install Chromium & chromedriver
         run: |
           sudo apt-get update
-          sudo apt-get install -y chromium-browser
-          CHROME_VERSION=$(chromium-browser --version | grep -oP '\d+\.\d+\.\d+')
-          echo "Detected Chromium version: $CHROME_VERSION"
-          DRIVER_VERSION=$(curl -s "https://googlechromelabs.github.io/chrome-for-testing/last-known-good-versions-with-downloads.json" | jq -r ".channels.Stable.version")
-          DRIVER_URL="https://storage.googleapis.com/chrome-for-testing-public/$DRIVER_VERSION/linux64/chromedriver-linux64.zip"
-          curl -sSL $DRIVER_URL -o chromedriver.zip
-          unzip -o chromedriver.zip
-          sudo mv chromedriver-linux64/chromedriver /usr/local/bin/chromedriver
-          sudo chmod +x /usr/local/bin/chromedriver
+          sudo apt-get install -y chromium-browser chromium-chromedriver
+          sudo ln -sf /usr/lib/chromium-browser/chromedriver /usr/local/bin/chromedriver
 
-      - name: Run main.py
+      - name: Run script
         env:
           TELEGRAM_TOKEN: ${{ secrets.TELEGRAM_TOKEN }}
           TELEGRAM_CHAT_ID: ${{ secrets.TELEGRAM_CHAT_ID }}
