@@ -1,112 +1,93 @@
-import requests
-from bs4 import BeautifulSoup
 import os
-import hashlib
+import time
+from datetime import datetime, timedelta
+from selenium import webdriver
+from selenium.webdriver.chrome.options import Options
+from selenium.webdriver.common.by import By
+import telegram
+import requests
 
-TELEGRAM_BOT_TOKEN = os.environ.get("TELEGRAM_BOT_TOKEN")
-TELEGRAM_USER_ID = os.environ.get("TELEGRAM_USER_ID")
-TEAMS_WEBHOOK_URL = os.environ.get("TEAMS_WEBHOOK_URL")
+NETSKOPE_URL = "https://trustportal.netskope.com/incidents"
 
-NETSKOPE_URL = 'https://trustportal.netskope.com/incidents'
-HASH_FILE = 'last_summary_hash.txt'
+# Función para inicializar Selenium en modo headless
+def iniciar_driver():
+    chrome_options = Options()
+    chrome_options.add_argument("--headless")
+    chrome_options.add_argument("--no-sandbox")
+    chrome_options.add_argument("--disable-dev-shm-usage")
+    chrome_options.add_argument("--disable-gpu")
+    chrome_options.add_argument("--window-size=1920,1080")
+    return webdriver.Chrome(options=chrome_options)
 
-# Diccionario de traducción de estados
-TRADUCCION_ESTADOS = {
-    "Resolved": "Resuelto",
-    "Mitigated": "Mitigado",
-    "Update": "Actualización",
-    "Investigating": "Investigando",
-    "Monitoring": "Monitorizando",
-    "Identified": "Identificado",
-    "In Progress": "En progreso",
-    "Desconocido": "Desconocido"
-}
-
-def traducir_estado(estado_original):
-    return TRADUCCION_ESTADOS.get(estado_original, estado_original)
-
+# Función para scrapear incidentes pasados de Netskope
 def obtener_incidentes_netskope():
-    response = requests.get(NETSKOPE_URL)
-    soup = BeautifulSoup(response.text, 'html.parser')
+    driver = iniciar_driver()
+    driver.get(NETSKOPE_URL)
+    time.sleep(3)  # Esperar que se cargue el contenido JS
 
     incidentes = []
-    cards = soup.select('div.card.incident-card')
-    
-    for card in cards:
-        titulo = card.select_one('h3.card-title')
-        fecha = card.select_one('div.card-subtitle')
-        estado = card.select_one('div.card-status span')
+    hoy = datetime.utcnow()
+    hace_15_dias = hoy - timedelta(days=15)
 
-        if titulo:
-            estado_texto = estado.text.strip() if estado else "Desconocido"
-            incidente = {
-                "titulo": titulo.text.strip(),
-                "fecha": fecha.text.strip() if fecha else "Sin fecha",
-                "estado": traducir_estado(estado_texto)
-            }
-            incidentes.append(incidente)
+    try:
+        bloques_fecha = driver.find_elements(By.XPATH, "//h3[contains(text(),'Aug') or contains(text(),'Jul') or contains(text(),'Jun')]")
+        for bloque in bloques_fecha:
+            fecha_texto = bloque.text.strip()
+            try:
+                fecha_incidente = datetime.strptime(fecha_texto, "%b %d, %Y")
+            except ValueError:
+                continue
+
+            if fecha_incidente < hace_15_dias:
+                continue
+
+            siguiente = bloque.find_element(By.XPATH, "./following-sibling::*[1]")
+            if "Incident" in siguiente.text:
+                titulo = siguiente.text.strip()
+                detalles = siguiente.find_element(By.XPATH, "./following-sibling::*[1]").text.strip()
+                incidentes.append(f"📅 {fecha_texto}\n🧾 {titulo}\n{detalles}\n")
+    except Exception as e:
+        incidentes.append(f"⚠️ Error analizando la página de Netskope: {e}")
+    finally:
+        driver.quit()
 
     return incidentes
 
-def generar_resumen(incidentes):
-    if not incidentes:
-        return "✅ No hay incidentes reportados por Netskope en los últimos 15 días."
-
-    resumen = f"📊 *Resumen de incidentes Netskope (últimos 15 días)*\n\n"
-    for i, inc in enumerate(incidentes, 1):
-        resumen += f"{i}. *{inc['titulo']}*\n"
-        resumen += f"   📅 Fecha: {inc['fecha']}\n"
-        resumen += f"   🔄 Estado: `{inc['estado']}`\n\n"
-    resumen += f"🔗 Ver más: {NETSKOPE_URL}"
-    return resumen
-
-def calcular_hash(texto):
-    return hashlib.sha256(texto.encode('utf-8')).hexdigest()
-
-def cargar_hash_anterior():
-    if os.path.exists(HASH_FILE):
-        with open(HASH_FILE, 'r') as f:
-            return f.read().strip()
-    return ""
-
-def guardar_hash_actual(hash_texto):
-    with open(HASH_FILE, 'w') as f:
-        f.write(hash_texto)
-
+# Función para enviar mensaje por Telegram
 def enviar_telegram(mensaje):
-    if not TELEGRAM_BOT_TOKEN or not TELEGRAM_USER_ID:
-        print("⚠️ Falta configuración de Telegram")
-        return
-    url = f"https://api.telegram.org/bot{TELEGRAM_BOT_TOKEN}/sendMessage"
-    data = {
-        "chat_id": TELEGRAM_USER_ID,
-        "text": mensaje,
-        "parse_mode": "Markdown"
-    }
-    requests.post(url, data=data)
+    token = os.getenv("TELEGRAM_BOT_TOKEN")
+    user_id = os.getenv("TELEGRAM_USER_ID")
+    if token and user_id:
+        bot = telegram.Bot(token=token)
+        bot.send_message(chat_id=user_id, text=mensaje)
+    else:
+        print("⚠️ Token o User ID de Telegram no configurado")
 
+# Función para enviar mensaje por Teams
 def enviar_teams(mensaje):
-    if not TEAMS_WEBHOOK_URL:
-        print("⚠️ Falta configuración de Teams")
-        return
-    data = {"text": mensaje}
-    requests.post(TEAMS_WEBHOOK_URL, json=data)
+    webhook_url = os.getenv("TEAMS_WEBHOOK_URL")
+    if webhook_url:
+        json_data = { "text": mensaje }
+        try:
+            requests.post(webhook_url, json=json_data)
+        except Exception as e:
+            print(f"Error enviando a Teams: {e}")
+    else:
+        print("ℹ️ Webhook de Teams no configurado")
 
+# Ejecutar todo
 def main():
+    resumen = "📊 *Resumen de incidentes Netskope (últimos 15 días)*\n\n"
     incidentes = obtener_incidentes_netskope()
-    resumen = generar_resumen(incidentes)
 
-    hash_actual = calcular_hash(resumen)
-    hash_anterior = cargar_hash_anterior()
+    if incidentes:
+        resumen += "\n".join(incidentes)
+    else:
+        resumen += "✅ No hay incidentes reportados en los últimos 15 días."
 
-    if hash_actual == hash_anterior:
-        print("✅ No hay cambios en los incidentes. No se envía alerta.")
-        return
-
-    print("📤 Enviando resumen actualizado...")
+    print(resumen)
     enviar_telegram(resumen)
     enviar_teams(resumen)
-    guardar_hash_actual(hash_actual)
 
-if __name__ == '__main__':
+if __name__ == "__main__":
     main()
