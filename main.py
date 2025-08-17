@@ -3,7 +3,7 @@ from bs4 import BeautifulSoup
 import json
 import os
 
-# Configuración desde variables de entorno
+# Variables de entorno
 TELEGRAM_BOT_TOKEN = os.environ.get("TELEGRAM_BOT_TOKEN")
 TELEGRAM_USER_ID = os.environ.get("TELEGRAM_USER_ID")
 TEAMS_WEBHOOK_URL = os.environ.get("TEAMS_WEBHOOK_URL")
@@ -14,7 +14,6 @@ NETSKOPE_URL = 'https://trustportal.netskope.com/incidents'
 def obtener_incidentes_netskope():
     response = requests.get(NETSKOPE_URL)
     soup = BeautifulSoup(response.text, 'html.parser')
-    
     incidentes = []
     for card in soup.select('div.card.incident-card'):
         titulo = card.select_one('h3.card-title').text.strip()
@@ -39,24 +38,18 @@ def guardar_incidentes(incidentes):
 
 def enviar_telegram(mensaje):
     if not TELEGRAM_BOT_TOKEN or not TELEGRAM_USER_ID:
-        print("⚠️ No se ha configurado Telegram.")
+        print("⚠️ Falta configuración de Telegram")
         return
     url = f"https://api.telegram.org/bot{TELEGRAM_BOT_TOKEN}/sendMessage"
     data = {"chat_id": TELEGRAM_USER_ID, "text": mensaje}
-    try:
-        requests.post(url, data=data)
-    except Exception as e:
-        print("Error enviando a Telegram:", e)
+    requests.post(url, data=data)
 
 def enviar_teams(mensaje):
     if not TEAMS_WEBHOOK_URL:
-        print("⚠️ No se ha configurado Teams.")
+        print("⚠️ Falta configuración de Teams")
         return
     data = {"text": mensaje}
-    try:
-        requests.post(TEAMS_WEBHOOK_URL, json=data)
-    except Exception as e:
-        print("Error enviando a Teams:", e)
+    requests.post(TEAMS_WEBHOOK_URL, json=data)
 
 def main():
     incidentes_actuales = obtener_incidentes_netskope()
