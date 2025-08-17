@@ -10,9 +10,9 @@ jobs:
     runs-on: ubuntu-latest
 
     strategy:
-      fail-fast: false
-      matrix:
-        vendor: [netskope, proofpoint]
+  fail-fast: false
+  matrix:
+    vendor: [netskope, proofpoint, qualys]
 
     env:
       TELEGRAM_BOT_TOKEN: ${{ secrets.TELEGRAM_BOT_TOKEN }}
