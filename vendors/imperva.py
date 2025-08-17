@@ -248,7 +248,7 @@ def parse_incidents_today(soup: BeautifulSoup):
 
     return {"date": date_str, "count": len(items), "items": items or ["- (No details)"]}
 
-# ---------- Formato mensaje ----------
+# ---------- Formato mensaje (con Overall status solo aquí) ----------
 
 def format_message(components, today_inc):
     lines = [
@@ -257,7 +257,20 @@ def format_message(components, today_inc):
         ""
     ]
 
-    # Component status (solo no-operational)
+    # Overall summary (peace-of-mind line) — ONLY in Imperva
+    overall_bits = []
+    if not components:
+        overall_bits.append("All components Operational")
+    # 'No incidents today' cuando conteo es 0
+    if today_inc and (today_inc.get("count", 0) == 0):
+        items = today_inc.get("items") or []
+        literal = next((it for it in items if "No incidents reported today" in it), None)
+        overall_bits.append(literal or "No incidents reported today.")
+    if overall_bits:
+        lines.append("Overall status: " + " • ".join(overall_bits))
+        lines.append("")
+
+    # Component status (only non-operational)
     lines.append("Component status")
     if components:
         for it in components:
@@ -266,11 +279,11 @@ def format_message(components, today_inc):
     else:
         lines.append("- All components Operational")
 
-    # Incidents today (solo hoy)
+    # Incidents today (only today)
     lines.append("")
     lines.append("Incidents today")
-    lines.append(f"{today_inc['date']} — {today_inc['count']} incident(s)")
-    for line in today_inc["items"]:
+    lines.append(f"{today_inc.get('date', 'Today')} — {today_inc.get('count', 0)} incident(s)")
+    for line in (today_inc.get("items") or ["- No incidents reported today."]):
         lines.append(line)
 
     return "\n".join(lines)
