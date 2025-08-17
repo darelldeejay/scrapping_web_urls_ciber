@@ -3,7 +3,7 @@ name: Web Status Monitor_test
 on:
   workflow_dispatch:
   schedule:
-    - cron: '0 * * * *'  # Ejecutar cada hora
+    - #cron: '0 * * * *'  # Ejecutar cada hora
 
 jobs:
   check_status:
