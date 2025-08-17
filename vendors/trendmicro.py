@@ -59,8 +59,13 @@ def wait_for_page(driver):
             return
         time.sleep(0.3)
 
-# ---------- Extraer arrays sspDataInfo de <script> ----------
+# ---------- Helpers para "no incidents" textual ----------
+def extract_no_incidents_text(soup: BeautifulSoup) -> str:
+    full = collapse_ws(soup.get_text(" ", strip=True))
+    m = NO_INCIDENTS_TODAY_RE.search(full)
+    return m.group(0) if m else "No incidents reported today."
 
+# ---------- Extraer arrays sspDataInfo de <script> ----------
 def _extract_json_array_from_key(script_text: str, key: str):
     m = re.search(rf"{re.escape(key)}\s*[:=]\s*(\[)", script_text)
     if not m:
@@ -94,28 +99,26 @@ def find_ssp_data_info_arrays(html: str):
 def parse_ssp_records_for_product(html: str, product_name: str):
     """
     Devuelve lista de dicts SOLO del producto indicado:
-    { id, status (int), status_text, subject, otherImpact, hisDate(UTC), productEnName }
+    { id, status(int), status_text, subject, otherImpact, hisDate(UTC), productEnName }
     """
     arrays = find_ssp_data_info_arrays(html)
     records = []
     for arr_txt in arrays:
         data = None
-        # 1º intento directo
         try:
             data = json.loads(arr_txt)
         except Exception:
-            # Limpia comas colgantes mínimas; si aún falla, ignora este array
             try:
                 cleaned = re.sub(r",\s*}", "}", arr_txt)
                 cleaned = re.sub(r",\s*]", "]", cleaned)
                 data = json.loads(cleaned)
             except Exception:
-                continue  # ← SKIP el array problemático
+                continue  # ignora arrays ilegibles
 
         for item in data:
             prod = str(item.get("productEnName") or "").strip()
             if prod != product_name:
-                continue  # ← filtramos por producto correcto
+                continue
 
             _id = str(item.get("id") or item.get("incidentId") or item.get("caseId") or "")
             if not _id:
@@ -156,12 +159,15 @@ def parse_ssp_records_for_product(html: str, product_name: str):
     return records
 
 # ---------- Solo HOY ----------
-
 def is_today_utc(dtobj: datetime) -> bool:
     now = datetime.utcnow()
     return (dtobj.year, dtobj.month, dtobj.day) == (now.year, now.month, now.day)
 
 def summarize_today(records):
+    """
+    Agrupa por 'id' y toma la última actualización de HOY para cada incidente.
+    Devuelve: { "count": N, "items": ["• Resolved — Title (HH:MM UTC)", ...] }
+    """
     today_updates = [r for r in records if is_today_utc(r["hisDate"])]
     if not today_updates:
         return {"count": 0, "items": []}
@@ -183,13 +189,9 @@ def summarize_today(records):
     return {"count": len(lines), "items": lines}
 
 # ---------- Runner ----------
-
 def run():
     driver = start_driver()
     try:
-        any_incidents = False
-        sections = []
-
         for site in SITES:
             name = site["name"]
             url = site["url"]
@@ -212,26 +214,30 @@ def run():
             records = parse_ssp_records_for_product(html, product)
             today = summarize_today(records)
 
+            # Construye SIEMPRE un mensaje por cada consola
+            lines = [
+                f"Trend Micro - {name} - Status",
+                now_utc_str(),
+                ""
+            ]
             if today["count"] > 0:
-                any_incidents = True
-                lines = [f"[{name}]"]
                 lines.append(f"Incidents today — {today['count']} incident(s)")
                 lines.extend(today["items"])
-                sections.append("\n".join(lines))
             else:
-                print(f"{name}: No incidents today.")
+                soup = BeautifulSoup(html, "lxml")
+                no_msg = extract_no_incidents_text(soup)
+                lines.append("Incidents today")
+                lines.append(f"- {no_msg}")
 
-        if any_incidents:
-            msg_lines = ["Trend Micro - Status", now_utc_str(), ""]
-            msg_lines.append("\n\n".join(sections))
-            msg = "\n".join(msg_lines)
-            print("\n===== TREND MICRO =====")
+            msg = "\n".join(lines)
+
+            print(f"\n===== {name.upper()} =====")
             print(msg)
-            print("=======================\n")
+            print("==========================\n")
+
+            # Enviar notificación individual por consola
             send_telegram(msg)
             send_teams(msg)
-        else:
-            print("Trend Micro: no incidents today in Cloud One or Vision One. No notification sent.")
 
     except Exception as e:
         print(f"[trendmicro] ERROR: {e}")
