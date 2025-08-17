@@ -5,7 +5,8 @@ REGISTRY = {
     "netskope": "vendors.netskope",
     "proofpoint": "vendors.proofpoint",
     "qualys": "vendors.qualys",
-    "aruba": "vendors.aruba",            # ← NUEVO
+    "aruba": "vendors.aruba",
+    "imperva": "vendors.imperva",   # ← NUEVO
 }
 
 def main():
