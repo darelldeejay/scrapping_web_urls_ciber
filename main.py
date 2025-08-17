@@ -19,7 +19,7 @@ def iniciar_driver():
     options.add_argument("--headless=new")
     options.add_argument("--disable-dev-shm-usage")
     options.add_argument("--no-sandbox")
-    options.add_argument("--user-data-dir=/tmp/chrome-data")  # evitar error de perfil duplicado
+    options.add_argument("--user-data-dir=/tmp/chrome-data")
     options.binary_location = (
         which("chromium-browser") or which("chromium") or which("google-chrome")
     )
@@ -30,7 +30,6 @@ def analizar_netskope(driver):
     driver.get(URL_NETSKOPE)
     time.sleep(3)
 
-    # Ir a la pestaña "Incidents"
     try:
         incidents_tab = driver.find_element(By.LINK_TEXT, "Incidents")
         incidents_tab.click()
@@ -39,7 +38,6 @@ def analizar_netskope(driver):
         print("❌ No se pudo acceder a la pestaña Incidents:", e)
         return "⚠️ Error al acceder a la sección de incidentes de Netskope."
 
-    # Buscar secciones de incidentes pasados
     incidentes = driver.find_elements(By.CSS_SELECTOR, ".past-incidents .incidents-list > div")
 
     resumen = "📊 *Resumen de incidentes Netskope (últimos 15 días)*\n"
@@ -52,7 +50,6 @@ def analizar_netskope(driver):
         try:
             fecha_texto = incidente.find_element(By.CSS_SELECTOR, "div:nth-child(1)").text.strip()
             fecha_incidente = datetime.strptime(fecha_texto, "%b %d, %Y")
-
             if fecha_incidente >= datetime.utcnow() - timedelta(days=15):
                 titulo = incidente.find_element(By.CSS_SELECTOR, ".incident-title").text.strip()
                 estado = incidente.find_element(By.CSS_SELECTOR, ".incident-status").text.strip()
