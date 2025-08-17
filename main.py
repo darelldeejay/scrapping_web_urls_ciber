@@ -4,88 +4,128 @@ from datetime import datetime, timedelta
 from selenium import webdriver
 from selenium.webdriver.chrome.options import Options
 from selenium.webdriver.common.by import By
-import telegram
 import requests
 
-NETSKOPE_URL = "https://trustportal.netskope.com/incidents"
+# Configuración de variables de entorno (Telegram / Teams)
+TELEGRAM_BOT_TOKEN = os.getenv("TELEGRAM_BOT_TOKEN")
+TELEGRAM_USER_ID = os.getenv("TELEGRAM_USER_ID")
+TEAMS_WEBHOOK_URL = os.getenv("TEAMS_WEBHOOK_URL")
 
-# Función para inicializar Selenium en modo headless
+URL_NETSKOPE = "https://trustportal.netskope.com/incidents"
+
 def iniciar_driver():
-    chrome_options = Options()
-    chrome_options.add_argument("--headless")
-    chrome_options.add_argument("--no-sandbox")
-    chrome_options.add_argument("--disable-dev-shm-usage")
-    chrome_options.add_argument("--disable-gpu")
-    chrome_options.add_argument("--window-size=1920,1080")
-    return webdriver.Chrome(options=chrome_options)
+    options = Options()
+    options.add_argument('--headless')
+    options.add_argument('--no-sandbox')
+    options.add_argument('--disable-dev-shm-usage')
+    return webdriver.Chrome(options=options)
 
-# Función para scrapear incidentes pasados de Netskope
-def obtener_incidentes_netskope():
-    driver = iniciar_driver()
-    driver.get(NETSKOPE_URL)
-    time.sleep(3)  # Esperar que se cargue el contenido JS
+def extraer_incidentes_pasados(driver):
+    driver.get(URL_NETSKOPE)
+    time.sleep(5)  # Esperar carga JS
 
+    secciones = driver.find_elements(By.XPATH, "//div[contains(@class, 'component') and .//h3[contains(text(), 'Past Incidents')]]")
     incidentes = []
-    hoy = datetime.utcnow()
-    hace_15_dias = hoy - timedelta(days=15)
 
-    try:
-        bloques_fecha = driver.find_elements(By.XPATH, "//h3[contains(text(),'Aug') or contains(text(),'Jul') or contains(text(),'Jun')]")
-        for bloque in bloques_fecha:
-            fecha_texto = bloque.text.strip()
-            try:
-                fecha_incidente = datetime.strptime(fecha_texto, "%b %d, %Y")
-            except ValueError:
+    if not secciones:
+        print("No se encontró la sección de incidentes pasados.")
+        return []
+
+    for seccion in secciones:
+        contenedores = seccion.find_elements(By.XPATH, ".//div[contains(@class, 'status-incidents')]")
+
+        for contenedor in contenedores:
+            texto = contenedor.text.strip()
+            if not texto:
                 continue
 
-            if fecha_incidente < hace_15_dias:
-                continue
+            lineas = texto.splitlines()
+            fecha = ""
+            titulo = ""
+            estado = ""
 
-            siguiente = bloque.find_element(By.XPATH, "./following-sibling::*[1]")
-            if "Incident" in siguiente.text:
-                titulo = siguiente.text.strip()
-                detalles = siguiente.find_element(By.XPATH, "./following-sibling::*[1]").text.strip()
-                incidentes.append(f"📅 {fecha_texto}\n🧾 {titulo}\n{detalles}\n")
-    except Exception as e:
-        incidentes.append(f"⚠️ Error analizando la página de Netskope: {e}")
-    finally:
-        driver.quit()
+            for linea in lineas:
+                if "Incident" in linea:
+                    titulo = linea.strip()
+                elif any(palabra in linea for palabra in ["Resolved", "Mitigated", "Investigating"]):
+                    estado = linea.strip()
+                elif "Aug" in linea or "Jul" in linea:  # ajustar si hay meses en español
+                    fecha = linea.strip()
+
+            if fecha and titulo:
+                try:
+                    fecha_dt = datetime.strptime(fecha, "%b %d, %Y")
+                    incidentes.append({
+                        "fecha": fecha_dt,
+                        "titulo": titulo,
+                        "estado": estado
+                    })
+                except Exception as e:
+                    print(f"Error al parsear fecha: {fecha} -> {e}")
 
     return incidentes
 
-# Función para enviar mensaje por Telegram
-def enviar_telegram(mensaje):
-    token = os.getenv("TELEGRAM_BOT_TOKEN")
-    user_id = os.getenv("TELEGRAM_USER_ID")
-    if token and user_id:
-        bot = telegram.Bot(token=token)
-        bot.send_message(chat_id=user_id, text=mensaje)
-    else:
-        print("⚠️ Token o User ID de Telegram no configurado")
+def filtrar_incidentes_recientes(incidentes, dias=15):
+    hoy = datetime.utcnow()
+    limite = hoy - timedelta(days=dias)
+    return [i for i in incidentes if i["fecha"] >= limite]
 
-# Función para enviar mensaje por Teams
-def enviar_teams(mensaje):
-    webhook_url = os.getenv("TEAMS_WEBHOOK_URL")
-    if webhook_url:
-        json_data = { "text": mensaje }
-        try:
-            requests.post(webhook_url, json=json_data)
-        except Exception as e:
-            print(f"Error enviando a Teams: {e}")
-    else:
-        print("ℹ️ Webhook de Teams no configurado")
+def construir_resumen(incidentes):
+    if not incidentes:
+        return "✅ No hay incidentes reportados en los últimos 15 días."
 
-# Ejecutar todo
-def main():
     resumen = "📊 *Resumen de incidentes Netskope (últimos 15 días)*\n\n"
-    incidentes = obtener_incidentes_netskope()
+    for i in incidentes:
+        resumen += f"📅 *{i['fecha'].strftime('%Y-%m-%d')}*\n"
+        resumen += f"🔹 *{i['titulo']}*\n"
+        resumen += f"📌 Estado: `{i['estado']}`\n\n"
+    return resumen
 
-    if incidentes:
-        resumen += "\n".join(incidentes)
-    else:
-        resumen += "✅ No hay incidentes reportados en los últimos 15 días."
+def enviar_telegram(mensaje):
+    if not TELEGRAM_BOT_TOKEN or not TELEGRAM_USER_ID:
+        print("⚠️ Variables TELEGRAM no definidas.")
+        return
 
-    print(resumen)
+    url = f"https://api.telegram.org/bot{TELEGRAM_BOT_TOKEN}/sendMessage"
+    data = {
+        "chat_id": TELEGRAM_USER_ID,
+        "text": mensaje,
+        "parse_mode": "Markdown"
+    }
+    try:
+        r = requests.post(url, json=data)
+        print("✅ Enviado a Telegram:", r.status_code)
+    except Exception as e:
+        print("❌ Error enviando a Telegram:", e)
+
+def enviar_teams(mensaje):
+    if not TEAMS_WEBHOOK_URL:
+        print("⚠️ TEAMS_WEBHOOK_URL no definida.")
+        return
+
+    data = {
+        "@type": "MessageCard",
+        "@context": "http://schema.org/extensions",
+        "summary": "Resumen Netskope",
+        "themeColor": "0078D7",
+        "title": "🛡️ Netskope - Resumen de incidentes (últimos 15 días)",
+        "text": mensaje.replace("*", "**").replace("`", "")
+    }
+    try:
+        r = requests.post(TEAMS_WEBHOOK_URL, json=data)
+        print("✅ Enviado a Teams:", r.status_code)
+    except Exception as e:
+        print("❌ Error enviando a Teams:", e)
+
+def main():
+    print("🔍 Iniciando análisis de Netskope...")
+    driver = iniciar_driver()
+    incidentes = extraer_incidentes_pasados(driver)
+    driver.quit()
+
+    recientes = filtrar_incidentes_recientes(incidentes)
+    resumen = construir_resumen(recientes)
+
     enviar_telegram(resumen)
     enviar_teams(resumen)
 
