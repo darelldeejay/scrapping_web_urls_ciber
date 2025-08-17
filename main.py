@@ -23,21 +23,19 @@ from webdriver_manager.chrome import ChromeDriverManager
 # Configuración y constantes
 # =========================
 NETSKOPE_URL = "https://trustportal.netskope.com/incidents"
-LOOKBACK_DAYS = 15  # Ventana de 15 días
+LOOKBACK_DAYS = 15
 REQUEST_TIMEOUT = 25
 
-# Variables de entorno
+# Entorno
 TELEGRAM_TOKEN = os.getenv("TELEGRAM_BOT_TOKEN")
 TELEGRAM_CHAT_ID = os.getenv("TELEGRAM_USER_ID")
 TEAMS_WEBHOOK_URL = os.getenv("TEAMS_WEBHOOK_URL")
-CHROME_PATH = os.getenv("CHROME_PATH")  # seteado por browser-actions/setup-chrome
-
-# Habilitar guardado de HTML para depuración (opcional: exporta SAVE_HTML=1)
+CHROME_PATH = os.getenv("CHROME_PATH")  # lo exporta browser-actions/setup-chrome
 SAVE_HTML = os.getenv("SAVE_HTML", "0") == "1"
 
 
 # =========================
-# Utilidades de notificación
+# Notificaciones
 # =========================
 def enviar_telegram(mensaje: str) -> None:
     if not TELEGRAM_TOKEN or not TELEGRAM_CHAT_ID:
@@ -77,7 +75,7 @@ def enviar_teams(mensaje: str) -> None:
 
 
 # =========================
-# Selenium (Chrome headless)
+# Selenium
 # =========================
 def iniciar_driver() -> webdriver.Chrome:
     opts = Options()
@@ -90,7 +88,6 @@ def iniciar_driver() -> webdriver.Chrome:
     if CHROME_PATH:
         opts.binary_location = CHROME_PATH
 
-    # webdriver-manager descarga un ChromeDriver compatible con la versión instalada
     service = Service(ChromeDriverManager().install())
     driver = webdriver.Chrome(service=service, options=opts)
     driver.set_page_load_timeout(60)
@@ -112,10 +109,6 @@ def safe_click(driver: webdriver.Chrome, element) -> bool:
 
 
 def expandir_past_incidents(driver: webdriver.Chrome) -> None:
-    """
-    Intenta expandir 'Past Incidents (Previous 15 days)' si está colapsada.
-    Soporta <summary>, botones de acordeón, encabezados clicables, etc.
-    """
     candidatos = [
         "Past Incidents (Previous 15 days)",
         "Past Incidents",
@@ -129,14 +122,10 @@ def expandir_past_incidents(driver: webdriver.Chrome) -> None:
                 txt = (el.text or "").strip()
                 if not txt:
                     continue
-
-                # Click directo sobre summary o button
                 if tag in ("summary", "button") and safe_click(driver, el):
                     print(f"[Expand] Click en <{tag}> para '{label}'.")
                     time.sleep(1)
                     return
-
-                # Si es un heading, intenta el contenedor con aria-expanded/role=button
                 parent = el
                 for _ in range(3):
                     try:
@@ -158,10 +147,12 @@ def expandir_past_incidents(driver: webdriver.Chrome) -> None:
 
 
 # =========================
-# Parsing y normalización
+# Parsing
 # =========================
 MONTHS = "Jan|Feb|Mar|Apr|May|Jun|Jul|Aug|Sep|Oct|Nov|Dec|Ene|Feb|Mar|Abr|May|Jun|Jul|Ago|Sep|Oct|Nov|Dic"
-DATE_REGEX = rf"({MONTHS})\s+\d{{1,2}},?\s+\d{{4}}(?:\s+\d{{1,2}}:\d{{2}}(?:\s*(AM|PM))?\s*(UTC|GMT|[A-Z]{{2,4}})?)?"
+DATE_REGEX = rf"({MONTHS})\s+\d{{1,2}},?\s+\d{{4}}(?:\s+\d{{1,2}}:\d{{2}}\s*(AM|PM)?)?\s*(UTC|GMT|[A-Z]{{2,4}})?"
+STATUS_TOKENS = ["Resolved", "Mitigated", "Monitoring", "Identified", "Investigating", "Update", "Degraded"]
+
 
 def parse_datetime_any(text: str):
     try:
@@ -185,25 +176,10 @@ def parse_datetime_any(text: str):
     return None
 
 
-def incident_status_from_text(text: str) -> str:
-    t = (text or "").lower()
-    if "resolved" in t or "restored" in t or "completed" in t:
-        return "Resolved"
-    if "monitoring" in t:
-        return "Monitoring"
-    if "identified" in t:
-        return "Identified"
-    if "investigating" in t:
-        return "Investigating"
-    if "degraded" in t:
-        return "Degraded"
-    return "Update"
-
-
-def extract_section_cards(soup: BeautifulSoup, keywords: list[str]):
+def find_section_container(soup: BeautifulSoup, keywords: list[str]):
     """
-    Encuentra tarjetas de incidentes bajo una sección cuyo heading contenga cualquiera de `keywords`.
-    Devuelve una lista de nodos BeautifulSoup que representan "cards" de incidentes.
+    Devuelve el contenedor de la sección cuyo heading contiene alguna de las keywords.
+    Sin fallback global: si no hay heading, devuelve None.
     """
     heading = None
     for kw in keywords:
@@ -214,30 +190,70 @@ def extract_section_cards(soup: BeautifulSoup, keywords: list[str]):
         )
         if heading:
             break
-
     if not heading:
-        # Fallback global
-        return soup.select(".incident, [class*='incident'], a[href*='/incidents/']")
-
-    # Intenta localizar un contenedor cercano con los items
+        return None
     container = heading.find_next_sibling()
     if not container:
         container = heading.parent
+    return container
 
+
+def cards_in_container(container: BeautifulSoup):
+    if not container:
+        return []
     cards = container.select(".incident, [class*='incident'], a[href*='/incidents/']")
     if not cards:
         nxt = container.find_next_sibling()
         if nxt:
             cards = nxt.select(".incident, [class*='incident'], a[href*='/incidents/']")
-    if not cards:
-        cards = soup.select(".incident, [class*='incident'], a[href*='/incidents/']")
     return cards
+
+
+def extract_sections_strict(soup: BeautifulSoup):
+    """
+    Devuelve (cards_open, cards_past) separando con precisión según los headings.
+    - Open Incidents: estricto (si no hay, lista vacía).
+    - Past Incidents: busca su contenedor; si no encuentra, intenta un fallback suave.
+    """
+    open_container = find_section_container(soup, ["Open Incidents", "Active Incidents", "Active", "Current incidents"])
+    past_container = find_section_container(soup, ["Past Incidents (Previous 15 days)", "Past Incidents", "Previous 15 days"])
+
+    open_cards = cards_in_container(open_container) if open_container else []
+    past_cards = cards_in_container(past_container)
+
+    # Si no encontró contenedor de past, último recurso: cualquier card bajo un heading que contenga "Past"
+    if not past_cards:
+        alt_heading = soup.find(lambda tag: tag.name in ["h1","h2","h3","h4","div","summary"]
+                                and "past" in tag.get_text(strip=True).lower())
+        if alt_heading:
+            past_cards = cards_in_container(alt_heading.find_next_sibling())
+
+    return open_cards, past_cards
+
+
+def nearest_date_after(label_text: str, full_text: str):
+    """
+    Busca la primera fecha después de la ocurrencia de label_text (p.ej. 'Resolved').
+    """
+    try:
+        pos = full_text.lower().find(label_text.lower())
+        if pos == -1:
+            return None
+        window = full_text[pos: pos + 400]  # ventana razonable
+        m = re.search(DATE_REGEX, window, flags=re.I)
+        if m:
+            return parse_datetime_any(m.group(0))
+    except Exception:
+        pass
+    return None
 
 
 def normalize_card(card) -> dict:
     """
     Convierte un nodo de incidente a dict estándar.
-    Campos: title, status, url, started_at, ended_at, raw_text
+    Reglas clave:
+    - Si aparece 'Resolved' en la cronología, status='Resolved' y ended_at=fecha cercana a 'Resolved'.
+    - started_at: intenta primera fecha del bloque; si no, cualquiera encontrada.
     """
     text = card.get_text(separator=" ", strip=True)
     url = None
@@ -261,33 +277,49 @@ def normalize_card(card) -> dict:
     if not title:
         title = " ".join((text or "").split()[:14]) or "Netskope Incident"
 
-    # Fechas (<time> primero)
+    # Fechas del contenido
     started_at = None
     ended_at = None
+
+    # 1) <time> tags (si existen)
     times = card.find_all("time")
-    if times:
-        try:
-            t0 = times[0].get("datetime") or times[0].get_text(strip=True)
-            started_at = parse_datetime_any(t0)
-        except Exception:
-            pass
-        if len(times) > 1:
-            try:
-                tn = times[-1].get("datetime") or times[-1].get_text(strip=True)
-                ended_at = parse_datetime_any(tn)
-            except Exception:
-                pass
+    parsed_times = []
+    for t in times:
+        dt = parse_datetime_any(t.get("datetime") or t.get_text(strip=True))
+        if dt:
+            parsed_times.append(dt)
 
-    # Si no hay <time>, intenta parsear del texto
-    if not started_at:
-        started_at = parse_datetime_any(text)
-    # Si el texto insinúa "Resolved", intenta la última fecha como ended_at
-    if not ended_at and ("resolved" in (text or "").lower() or "restored" in (text or "").lower()):
-        dates = list(re.finditer(DATE_REGEX, text or "", flags=re.I))
-        if dates:
-            ended_at = parse_datetime_any(dates[-1].group(0))
+    if parsed_times:
+        parsed_times.sort()
+        started_at = parsed_times[0]
+        ended_at = parsed_times[-1]
 
-    status = incident_status_from_text(text)
+    # 2) Regex en texto completo
+    if not started_at or not ended_at:
+        all_dates = [parse_datetime_any(m.group(0)) for m in re.finditer(DATE_REGEX, text or "", flags=re.I)]
+        all_dates = [d for d in all_dates if d]
+        if all_dates and not started_at:
+            started_at = min(all_dates)
+        if all_dates and not ended_at:
+            ended_at = max(all_dates)
+
+    # 3) Si hay 'Resolved', priorizar su fecha como ended_at
+    status = None
+    if "resolved" in (text or "").lower():
+        status = "Resolved"
+        resolved_dt = nearest_date_after("Resolved", text)
+        if resolved_dt:
+            ended_at = resolved_dt
+
+    # Si aún no hay status, toma el primer token de estado que aparezca en el texto (orden de prioridad)
+    if not status:
+        for tok in STATUS_TOKENS:
+            if tok.lower() in (text or "").lower():
+                status = tok
+                # si es 'Update', intenta al menos asignar fecha más reciente como ended_at
+                break
+    if not status:
+        status = "Update"
 
     return {
         "title": title,
@@ -303,7 +335,7 @@ def dedup_incidents(items: list[dict]) -> list[dict]:
     seen = set()
     out = []
     for it in items:
-        key = ((it.get("title") or "").strip(), (it.get("status") or "").strip(), (it.get("url") or "").strip())
+        key = ((it.get("title") or "").strip(), (it.get("url") or "").strip())
         if key in seen:
             continue
         seen.add(key)
@@ -315,19 +347,16 @@ def analizar_netskope(driver: webdriver.Chrome) -> tuple[list[dict], list[dict]]
     print("🔍 Cargando Netskope...")
     driver.get(NETSKOPE_URL)
 
-    # Espera a que la página renderice contenido relacionado
     WebDriverWait(driver, 30).until(
         EC.presence_of_element_located(
-            (By.XPATH, "//*[contains(., 'Incidents') or contains(., 'Past Incidents') or contains(@class,'incident')]")
+            (By.XPATH, "//*[contains(., 'Incidents') or contains(., 'Open Incidents') or contains(., 'Past Incidents')]")
         )
     )
 
-    # Intenta expandir la sección de "Past Incidents"
     expandir_past_incidents(driver)
     time.sleep(2)
 
     html = driver.page_source
-
     if SAVE_HTML:
         try:
             with open("page_source.html", "w", encoding="utf-8") as f:
@@ -338,32 +367,31 @@ def analizar_netskope(driver: webdriver.Chrome) -> tuple[list[dict], list[dict]]
 
     soup = BeautifulSoup(html, "lxml")
 
-    # Sección de incidentes activos
-    activos_cards = extract_section_cards(
-        soup, ["Active Incidents", "Active incidents", "Active", "Current incidents"]
-    )
-    activos = [normalize_card(c) for c in activos_cards]
-    activos = dedup_incidents(activos)
+    # Separa con precisión por secciones
+    open_cards, past_cards = extract_sections_strict(soup)
 
-    # Sección de últimos 15 días (Past Incidents)
-    pasados_cards = extract_section_cards(
-        soup, ["Past Incidents (Previous 15 days)", "Past Incidents", "Previous 15 days"]
-    )
-    pasados = [normalize_card(c) for c in pasados_cards]
+    # Normaliza
+    activos = [normalize_card(c) for c in open_cards]
+    pasados = [normalize_card(c) for c in past_cards]
+
+    # Dedup dentro de cada sección
+    activos = dedup_incidents(activos)
     pasados = dedup_incidents(pasados)
 
-    # Filtrado por ventana temporal para "pasados"
+    # Filtra 'pasados' a ventana de 15 días
     now = datetime.utcnow().replace(tzinfo=timezone.utc)
     cutoff = now - timedelta(days=LOOKBACK_DAYS)
 
     def in_lookback(inc: dict) -> bool:
         dt = inc.get("ended_at") or inc.get("started_at")
         if not dt:
-            # Si no hay fecha, mantenemos por prudencia (la sección ya es "past 15 days")
-            return True
+            return True  # la propia sección ya es "Previous 15 days"
         return dt >= cutoff
 
     pasados_15 = [i for i in pasados if in_lookback(i)]
+
+    # IMPORTANTE: no marcar como activos los que estén Resolved
+    activos = [i for i in activos if (i.get("status") or "").lower() != "resolved"]
 
     return activos, pasados_15
 
@@ -419,7 +447,6 @@ def main() -> int:
         print(resumen)
         print("===== FIN RESUMEN =====\n")
 
-        # Notificar SIEMPRE (aunque no haya incidentes)
         enviar_telegram(resumen)
         enviar_teams(resumen)
         return 0
