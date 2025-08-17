@@ -3,7 +3,7 @@ import os
 import re
 import time
 import traceback
-from datetime import datetime, timezone
+from datetime import datetime, timezone, timedelta
 
 from bs4 import BeautifulSoup
 from dateutil import parser as dateparser
@@ -18,304 +18,210 @@ from common.format import header
 URL = "https://status.qualys.com/history?filter=8f7fjwhmd4n0"
 SAVE_HTML = os.getenv("SAVE_HTML", "0") == "1"
 
-MONTHS = "Jan|Feb|Mar|Apr|May|Jun|Jul|Aug|Sep|Oct|Nov|Dec|Ene|Feb|Mar|Abr|May|Jun|Jul|Ago|Sep|Oct|Nov|Dic"
+# Meses abreviados + meses completos (encabezado "June 2025")
+MONTHS_SHORT = "Jan|Feb|Mar|Apr|May|Jun|Jul|Aug|Sep|Oct|Nov|Dec"
 MONTHS_FULL = "January|February|March|April|May|June|July|August|September|October|November|December"
 
-# Acepta '-' o '–' y TZ de 2-4 letras (PDT, CEST, UTC, etc.)
-DATE_LINE_RE = re.compile(
-    rf"\b({MONTHS})\s+\d{{1,2}},\s+\d{{1,2}}:\d{{2}}\s*[-–]\s*(?:({MONTHS})\s+\d{{1,2}},\s+)?\d{{1,2}}:\d{{2}}\s*(UTC|GMT|[A-Z]{{2,4}})\b",
+# Rango horario laxo: permite espacios extra alrededor de comas y guiones/en-dash
+DATE_RANGE_RE = re.compile(
+    rf"\b({MONTHS_SHORT})\s+\d{{1,2}}\s*,\s*\d{{1,2}}:\d{{2}}\s*[-–]\s*(?:({MONTHS_SHORT})\s+\d{{1,2}}\s*,\s*)?\d{{1,2}}:\d{{2}}\s*(UTC|GMT|[A-Z]{{2,4}})\b",
     re.I,
 )
-# Encabezado de mes: "June 2025"
-MONTH_HEADER_RE = re.compile(rf"^\s*({MONTHS_FULL})\s+(\d{{4}})\s*$", re.I)
 
+# Encabezado "June 2025"
+MONTH_HEADER_RE = re.compile(rf"\b({MONTHS_FULL})\s+(\d{{4}})\b", re.I)
+
+TZ_OFFSETS_MIN = {
+    "UTC": 0, "GMT": 0,
+    "PDT": -7*60, "PST": -8*60,
+    "EDT": -4*60, "EST": -5*60,
+    "CDT": -5*60, "CST": -6*60,
+    "MDT": -6*60, "MST": -7*60,
+    "CEST": 120, "CET": 60,
+    "BST": 60,
+    # añade abreviaturas si Qualys muestra otras
+}
 
 def wait_for_page(driver):
-    # Espera a que existan enlaces y luego a que el body contenga una línea de fecha
-    WebDriverWait(driver, 20).until(
-        EC.presence_of_element_located((By.CSS_SELECTOR, "a[href]"))
-    )
-    # Espera activa a que aparezca un patrón de fecha en el texto de la página
+    # Espera a que haya enlaces y que en el body ya aparezcan patrones de hora (tras el render dinámico)
+    WebDriverWait(driver, 20).until(EC.presence_of_element_located((By.CSS_SELECTOR, "a[href]")))
     for _ in range(20):
         body_text = driver.find_element(By.TAG_NAME, "body").text
-        if DATE_LINE_RE.search(body_text):
+        if DATE_RANGE_RE.search(_collapse_ws(body_text)):
             return
         time.sleep(0.5)
 
+def _collapse_ws(s: str) -> str:
+    return re.sub(r"\s+", " ", s or "").strip()
 
-def parse_dt_utc(s: str):
+def _norm_node_text(node) -> str:
     try:
-        dt = dateparser.parse(s, fuzzy=True)
-        if not dt:
-            return None
-        if dt.tzinfo is None:
-            dt = dt.replace(tzinfo=timezone.utc)
-        return dt.astimezone(timezone.utc)
+        return _collapse_ws(node.get_text(" ", strip=True))
+    except Exception:
+        return ""
+
+def _find_year_context(node) -> int | None:
+    # Busca hacia atrás el encabezado "June 2025" más cercano
+    from bs4.element import NavigableString
+    for prev in node.previous_elements:
+        txt = _collapse_ws(prev if isinstance(prev, NavigableString) else getattr(prev, "get_text", lambda *a,**k: "")(" ", strip=True))
+        m = MONTH_HEADER_RE.search(txt or "")
+        if m:
+            try:
+                return int(m.group(2))
+            except Exception:
+                pass
+    # fallback: por si viene dentro del mismo contenedor
+    anc = node
+    for _ in range(8):
+        if not anc: break
+        txt = _norm_node_text(anc)
+        m = MONTH_HEADER_RE.search(txt or "")
+        if m:
+            try:
+                return int(m.group(2))
+            except Exception:
+                pass
+        anc = getattr(anc, "parent", None)
+    return None
+
+def _parse_with_tz_abbrev(s_no_tz: str, tzabbr: str):
+    """Convierte 'Jun 13, 2025 09:18' + 'PDT' a UTC usando mapa de abreviaturas."""
+    try:
+        dt = datetime.strptime(s_no_tz, "%b %d, %Y %H:%M")
     except Exception:
         return None
+    offset = TZ_OFFSETS_MIN.get(tzabbr.upper())
+    if offset is None:
+        return None
+    tzinfo = timezone(timedelta(minutes=offset))
+    return dt.replace(tzinfo=tzinfo).astimezone(timezone.utc)
 
+def _build_dt_strings(part: str, year: int, tzabbr: str) -> str | None:
+    """
+    Normaliza 'Jun 13 , 09:18' -> 'Jun 13, 2025 09:18' (sin TZ).
+    """
+    part = _collapse_ws(part)
+    part = re.sub(r"\s*,\s*", ", ", part)
+    m = re.match(rf"({MONTHS_SHORT})\s+(\d{{1,2}}),\s*(\d{{1,2}}:\d{{2}})", part, flags=re.I)
+    if not m:
+        return None
+    mon, day, hm = m.groups()
+    return f"{mon} {day}, {year} {hm}"
 
-def parse_date_range_with_year(line_text: str, year_ctx: int | None):
-    """Convierte 'Jun 13, 09:18 - Jun 14, 11:18 PDT' en (start_utc, end_utc) usando año de contexto."""
-    m = DATE_LINE_RE.search(line_text or "")
+def _parse_date_range(date_text: str, context_node):
+    """
+    'Jun 13 , 09:18 - Jun 14 , 11:18 PDT' -> (start_utc, end_utc)
+    Usa año del encabezado más cercano.
+    """
+    date_text = _collapse_ws(date_text)
+    m = DATE_RANGE_RE.search(date_text or "")
     if not m:
         return None, None
-
-    tz = m.group(3) or "UTC"
+    tzabbr = m.group(3)
     parts = re.split(r"\s*[-–]\s*", m.group(0))
-    left = (parts[0] or "").strip().rstrip(",")
-    right = (parts[1] or "").strip()
+    left, right = parts[0], parts[1] if len(parts) > 1 else ""
 
-    start_str = left
-    if not re.search(r"\b(UTC|GMT|[A-Z]{2,4})\b", start_str, flags=re.I):
-        start_str += f" {tz}"
-    if year_ctx and not re.search(r"\b\d{4}\b", start_str):
-        start_str += f" {year_ctx}"
+    # Si 'right' no tiene mes/día, hereda del 'left'
+    if not re.search(rf"({MONTHS_SHORT})\s+\d{{1,2}}", right, flags=re.I):
+        md = re.match(rf"({MONTHS_SHORT})\s+\d{{1,2}}", left, flags=re.I)
+        if md:
+            right = f"{md.group(0)}, {right}"
 
-    if re.search(rf"\b({MONTHS})\s+\d{{1,2}},", right, flags=re.I):
-        end_str = right
-    else:
-        md = re.match(rf"\b({MONTHS})\s+(\d{{1,2}}),\s*\d{{1,2}}:\d{{2}}", left, flags=re.I)
-        end_str = f"{md.group(1)} {md.group(2)}, {right}" if md else right
+    year = _find_year_context(context_node) or datetime.utcnow().year
+    left_s  = _build_dt_strings(left, year, tzabbr)
+    right_s = _build_dt_strings(right, year, tzabbr)
+    sdt = _parse_with_tz_abbrev(left_s, tzabbr)  if left_s  else None
+    edt = _parse_with_tz_abbrev(right_s, tzabbr) if right_s else None
+    return sdt, edt
 
-    if not re.search(r"\b(UTC|GMT|[A-Z]{2,4})\b", end_str, flags=re.I):
-        end_str += f" {tz}"
-    if year_ctx and not re.search(r"\b\d{4}\b", end_str):
-        end_str += f" {year_ctx}"
+def _is_scheduled(text: str) -> bool:
+    t = (text or "").lower()
+    return "[scheduled]" in t or "scheduled maintenance" in t
 
-    return parse_dt_utc(start_str), parse_dt_utc(end_str)
-
-
-def qualys_status_from_text(text: str) -> str:
+def _status_from_text(text: str) -> str:
     low = (text or "").lower()
     if "has been resolved" in low or re.search(r"\bresolved\b", low):
         return "Resolved"
-    if "has been mitigated" in low or "mitigated" in low:
+    if "mitigated" in low:
         return "Mitigated"
     if "service disruption" in low or "degraded" in low or "impact" in low:
         return "Incident"
     return "Update"
 
+def _extract_items(soup: BeautifulSoup):
+    items = []
+    # 1) Busca divs cuyo texto NORMALIZADO contenga EXACTAMENTE un rango horario
+    candidates = []
+    for div in soup.find_all("div"):
+        txt = _norm_node_text(div)
+        matches = list(DATE_RANGE_RE.finditer(txt))
+        if len(matches) == 1:
+            candidates.append((div, txt, matches[0].group(0)))
 
-def anchor_before_date(card: BeautifulSoup, date_text: str):
-    """Devuelve el <a> que aparece ANTES de la línea de fecha dentro del card."""
-    last_a = None
-    reached_date = False
-    for el in card.descendants:
-        if isinstance(el, str):
-            if date_text and el.strip() and date_text in el:
-                reached_date = True
-                break
+    # 2) De esos, nos quedamos con los que NO sean Scheduled y que tengan un <a> antes de la fecha
+    for div, txt, date_str in candidates:
+        if _is_scheduled(txt):
             continue
-        if getattr(el, "name", None) == "a" and el.has_attr("href"):
-            t = el.get_text(" ", strip=True) or ""
+
+        # Busca anchors candidatos
+        anchors = div.find_all("a", href=True)
+        best_a = None
+        best_len = 0
+        pos_date = txt.find(date_str)
+        for a in anchors:
+            t = _collapse_ws(a.get_text(" ", strip=True))
             if not t:
                 continue
             if re.search(r"Subscribe To Updates|Support|Filter Components|Qualys|Login|Log in|Terms|Privacy|Guest", t, re.I):
                 continue
-            last_a = el
-    return last_a
+            pos_title = txt.find(t)
+            if pos_title != -1 and pos_title < pos_date and len(t) > best_len:
+                best_a = a
+                best_len = len(t)
 
+        # Si no hay anchor utilizable, intenta título por línea previa a la fecha
+        if not best_a and not anchors:
+            pass  # dejamos que el fallback (sin anchor) entre más abajo
 
-def find_cards_dom(soup: BeautifulSoup):
-    """
-    Busca divs que contengan exactamente UNA línea de fecha (card),
-    evitando ancestros demasiado grandes (mes completo).
-    """
-    def count_date_lines(node) -> int:
-        try:
-            txt = node.get_text(" ", strip=True)
-            return len(re.findall(DATE_LINE_RE, txt or ""))
-        except Exception:
-            return 0
-
-    candidates = []
-    for div in soup.find_all("div"):
-        if count_date_lines(div) == 1:
-            # descarta si algún ancestro cercano también tiene exactamente 1 (contendor de mes)
-            anc = div.parent
-            too_big = False
-            for _ in range(6):
-                if not anc or getattr(anc, "name", None) != "div":
-                    break
-                if count_date_lines(anc) == 1:
-                    too_big = True
-                    break
-                anc = anc.parent
-            if not too_big:
-                candidates.append(div)
-
-    # dedup
-    seen = set()
-    out = []
-    for c in candidates:
-        if id(c) not in seen:
-            seen.add(id(c))
-            out.append(c)
-    return out
-
-
-def fallback_cards_from_lines(soup: BeautifulSoup):
-    """
-    Fallback por texto puro:
-    - Recorre líneas.
-    - Mantiene el año del encabezado 'June 2025'.
-    - Cuando ve una línea de fechas, toma como título la primera línea
-      previa válida (no Scheduled ni frases de estado).
-    """
-    text = soup.get_text("\n", strip=True)
-    lines = [ln for ln in text.split("\n")]
-    items = []
-    current_year = None
-
-    i = 0
-    while i < len(lines):
-        line = lines[i].strip()
-        # Captura encabezado de mes -> año de contexto
-        mh = MONTH_HEADER_RE.match(line)
-        if mh:
-            current_year = int(mh.group(2))
-            i += 1
-            continue
-
-        m = DATE_LINE_RE.search(line)
-        if not m:
-            i += 1
-            continue
-
-        # Tenemos una línea de fecha; buscamos título hacia atrás
-        title = None
-        back = i - 1
-        while back >= 0 and (i - back) <= 6:  # mira hasta 6 líneas atrás
-            cand = lines[back].strip()
-            if not cand:
-                back -= 1
-                continue
-            if cand.startswith("[Scheduled]") or "scheduled maintenance" in cand.lower():
-                title = None  # card programado -> descartar
-                break
-            if re.search(r"has been resolved|has been mitigated|has been completed", cand, re.I):
-                back -= 1
-                continue
-            # Evita encabezados tipo "June 2025"
-            if MONTH_HEADER_RE.match(cand):
-                back -= 1
-                continue
-            title = cand
-            break
-
-        if title:
-            # Busca un href cuyo texto coincida (si existe)
-            url = None
-            a = soup.find("a", string=re.compile(re.escape(title), re.I))
-            if a and a.has_attr("href"):
-                href = a.get("href", "")
-                url = href if href.startswith("http") else f"https://status.qualys.com{href}" if href.startswith("/") else href
-
-            start, end = parse_date_range_with_year(line, current_year)
-            items.append({
-                "title": title,
-                "status": qualys_status_from_text("\n".join(lines[max(0, back): i+1])),
-                "url": url,
-                "started_at": start,
-                "ended_at": end,
-                "raw_text": "\n".join(lines[max(0, back): i+1]),
-            })
-        i += 1
-
-    # filtra programados por si se coló alguno
-    final = []
-    for it in items:
-        raw = (it.get("raw_text") or "").lower()
-        if "[scheduled]" in raw or "scheduled maintenance" in raw:
-            continue
-        final.append(it)
-    return final
-
-
-def analizar_qualys(driver):
-    driver.get(URL)
-    wait_for_page(driver)
-
-    html = driver.page_source
-    if SAVE_HTML:
-        try:
-            with open("qualys_page_source.html", "w", encoding="utf-8") as f:
-                f.write(html)
-            print("💾 HTML guardado en qualys_page_source.html")
-        except Exception as e:
-            print(f"No se pudo guardar HTML: {e}")
-
-    soup = BeautifulSoup(html, "lxml")
-
-    # 1) Intento por DOM (cards con 1 línea de fecha)
-    items = []
-    for card in find_cards_dom(soup):
-        card_text = card.get_text("\n", strip=True)
-
-        # Ignora programados a nivel de card
-        if "[Scheduled]" in card_text or "scheduled maintenance" in card_text.lower():
-            continue
-
-        # Año de contexto desde encabezado cercano
-        year_ctx = None
-        anc = card
-        for _ in range(8):
-            if not anc:
-                break
-            txt = anc.get_text(" ", strip=True)
-            mhy = MONTH_HEADER_RE.search(txt or "")
-            if mhy:
-                year_ctx = int(mhy.group(2))
-                break
-            anc = getattr(anc, "parent", None)
-
-        # fecha (primer match del card)
-        m_line = DATE_LINE_RE.search(card_text or "")
-        started_at = ended_at = None
-        date_line = None
-        if m_line:
-            date_line = m_line.group(0)
-            started_at, ended_at = parse_date_range_with_year(date_line, year_ctx)
-
-        # Título + URL (ancla antes de la fecha)
+        # Construye el item
         title = None
         url = None
-        if date_line:
-            a = anchor_before_date(card, date_line)
-            if a:
-                title = a.get_text(" ", strip=True)
-                href = a.get("href", "")
-                url = href if href.startswith("http") else f"https://status.qualys.com{href}" if href.startswith("/") else href
+        if best_a:
+            title = _collapse_ws(best_a.get_text(" ", strip=True))
+            href = best_a.get("href", "")
+            url = href if href.startswith("http") else f"https://status.qualys.com{href}" if href.startswith("/") else href
+        else:
+            # línea previa a la fecha, evitando frases de estado y scheduled
+            # (usamos el texto del div dividido por líneas pre-normalizadas)
+            raw_lines = [ln.strip() for ln in (div.get_text("\n", strip=True) or "").split("\n")]
+            acc = []
+            for ln in raw_lines:
+                if DATE_RANGE_RE.search(_collapse_ws(ln)):
+                    break
+                if _is_scheduled(ln) or re.search(r"has been resolved|has been mitigated|has been completed", ln, re.I):
+                    continue
+                if ln:
+                    acc.append(ln)
+            if acc:
+                title = _collapse_ws(acc[0])
 
         if not title:
-            # Fallback: primera línea previa válida
-            lines = [ln.strip() for ln in (card_text or "").split("\n") if ln.strip()]
-            for ln in lines:
-                if DATE_LINE_RE.search(ln):
-                    break
-                if ln.startswith("[Scheduled]") or "scheduled maintenance" in ln.lower():
-                    continue
-                if re.search(r"has been resolved|has been mitigated|has been completed", ln, re.I):
-                    continue
-                title = ln
-                break
+            continue  # no pudimos titular el card de forma fiable
 
-        if title:
-            items.append({
-                "title": title,
-                "status": qualys_status_from_text(card_text),
-                "url": url,
-                "started_at": started_at,
-                "ended_at": ended_at,
-                "raw_text": card_text,
-            })
+        started_at, ended_at = _parse_date_range(date_str, div)
+        status = _status_from_text(txt)
 
-    # 2) Fallback por líneas si no hay nada
-    if not items:
-        items = fallback_cards_from_lines(soup)
+        items.append({
+            "title": title,
+            "status": status,
+            "url": url,
+            "started_at": started_at,
+            "ended_at": ended_at,
+            "raw_text": txt,
+        })
 
-    # Ordenamos por fin/inicio desc
+    # Ordena por fin/inicio desc
     def sort_key(i):
         return (
             i.get("ended_at") or i.get("started_at") or datetime.min.replace(tzinfo=timezone.utc),
@@ -323,13 +229,11 @@ def analizar_qualys(driver):
         )
     return sorted(items, key=sort_key, reverse=True)
 
-
 def format_message(items):
     lines = [header("Qualys"), "\n<b>Histórico (meses visibles en la página)</b>"]
     if not items:
         lines.append("\n- No hay incidencias no programadas en los meses mostrados.")
         return "\n".join(lines)
-
     for idx, inc in enumerate(items, 1):
         t = inc.get("title") or "Sin título"
         u = inc.get("url")
@@ -343,17 +247,32 @@ def format_message(items):
         lines.append(f"   Estado: {st} · Inicio: {s_s} · Fin: {e_s}")
     return "\n".join(lines)
 
-
 def run():
     driver = start_driver()
     try:
-        items = analizar_qualys(driver)
+        driver.get(URL)
+        wait_for_page(driver)
+
+        html = driver.page_source
+        if SAVE_HTML:
+            try:
+                with open("qualys_page_source.html", "w", encoding="utf-8") as f:
+                    f.write(html)
+                print("💾 HTML guardado en qualys_page_source.html")
+            except Exception as e:
+                print(f"No se pudo guardar HTML: {e}")
+
+        soup = BeautifulSoup(html, "lxml")
+        items = _extract_items(soup)
         resumen = format_message(items)
+
         print("\n===== QUALYS =====")
         print(resumen)
         print("==================\n")
+
         send_telegram(resumen)
         send_teams(resumen)
+
     except Exception as e:
         print(f"[qualys] ERROR: {e}")
         traceback.print_exc()
