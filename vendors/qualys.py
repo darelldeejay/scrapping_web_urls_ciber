@@ -1,6 +1,7 @@
 # vendors/qualys.py
 import os
 import re
+import time
 import traceback
 from datetime import datetime, timezone
 
@@ -18,28 +19,28 @@ URL = "https://status.qualys.com/history?filter=8f7fjwhmd4n0"
 SAVE_HTML = os.getenv("SAVE_HTML", "0") == "1"
 
 MONTHS = "Jan|Feb|Mar|Apr|May|Jun|Jul|Aug|Sep|Oct|Nov|Dec|Ene|Feb|Mar|Abr|May|Jun|Jul|Ago|Sep|Oct|Nov|Dic"
+MONTHS_FULL = "January|February|March|April|May|June|July|August|September|October|November|December"
 
-# Acepta '-' o '–' y TZ de 2-4 letras (PDT, CEST, etc.)
+# Acepta '-' o '–' y TZ de 2-4 letras (PDT, CEST, UTC, etc.)
 DATE_LINE_RE = re.compile(
     rf"\b({MONTHS})\s+\d{{1,2}},\s+\d{{1,2}}:\d{{2}}\s*[-–]\s*(?:({MONTHS})\s+\d{{1,2}},\s+)?\d{{1,2}}:\d{{2}}\s*(UTC|GMT|[A-Z]{{2,4}})\b",
     re.I,
 )
-MONTH_YEAR_RE = re.compile(rf"\b({MONTHS})\s+(\d{{4}})\b", re.I)
+# Encabezado de mes: "June 2025"
+MONTH_HEADER_RE = re.compile(rf"^\s*({MONTHS_FULL})\s+(\d{{4}})\s*$", re.I)
 
 
 def wait_for_page(driver):
-    targets = [
-        (By.XPATH, "//*[contains(., 'Filter Components')]"),
-        (By.XPATH, "//*[contains(., 'Subscribe To Updates')]"),
-        (By.CSS_SELECTOR, "a[href]"),
-    ]
-    for by, sel in targets:
-        try:
-            WebDriverWait(driver, 20).until(EC.presence_of_element_located((by, sel)))
+    # Espera a que existan enlaces y luego a que el body contenga una línea de fecha
+    WebDriverWait(driver, 20).until(
+        EC.presence_of_element_located((By.CSS_SELECTOR, "a[href]"))
+    )
+    # Espera activa a que aparezca un patrón de fecha en el texto de la página
+    for _ in range(20):
+        body_text = driver.find_element(By.TAG_NAME, "body").text
+        if DATE_LINE_RE.search(body_text):
             return
-        except Exception:
-            continue
-    WebDriverWait(driver, 20).until(EC.presence_of_element_located((By.CSS_SELECTOR, "body")))
+        time.sleep(0.5)
 
 
 def parse_dt_utc(s: str):
@@ -54,40 +55,16 @@ def parse_dt_utc(s: str):
         return None
 
 
-def nearest_year(node):
-    """Busca el año del encabezado de mes (p.ej. 'June 2025') subiendo por el DOM."""
-    cur = node
-    for _ in range(12):
-        sib = getattr(cur, "previous_sibling", None)
-        while sib:
-            if getattr(sib, "get_text", None):
-                m = MONTH_YEAR_RE.search(sib.get_text(" ", strip=True))
-                if m:
-                    return int(m.group(2))
-            sib = getattr(sib, "previous_sibling", None)
-        cur = getattr(cur, "parent", None)
-        if not cur:
-            break
-        if getattr(cur, "get_text", None):
-            m = MONTH_YEAR_RE.search(cur.get_text(" ", strip=True))
-            if m:
-                return int(m.group(2))
-    return None
-
-
-def parse_date_range(line_text: str, node_for_context):
-    """Convierte 'Jun 13, 09:18 - Jun 14, 11:18 PDT' en (start_utc, end_utc)."""
+def parse_date_range_with_year(line_text: str, year_ctx: int | None):
+    """Convierte 'Jun 13, 09:18 - Jun 14, 11:18 PDT' en (start_utc, end_utc) usando año de contexto."""
     m = DATE_LINE_RE.search(line_text or "")
     if not m:
         return None, None
 
     tz = m.group(3) or "UTC"
-    # divide por el primer separador '-' o '–'
     parts = re.split(r"\s*[-–]\s*", m.group(0))
     left = (parts[0] or "").strip().rstrip(",")
     right = (parts[1] or "").strip()
-
-    year_ctx = nearest_year(node_for_context)
 
     start_str = left
     if not re.search(r"\b(UTC|GMT|[A-Z]{2,4})\b", start_str, flags=re.I):
@@ -100,80 +77,13 @@ def parse_date_range(line_text: str, node_for_context):
     else:
         md = re.match(rf"\b({MONTHS})\s+(\d{{1,2}}),\s*\d{{1,2}}:\d{{2}}", left, flags=re.I)
         end_str = f"{md.group(1)} {md.group(2)}, {right}" if md else right
+
     if not re.search(r"\b(UTC|GMT|[A-Z]{2,4})\b", end_str, flags=re.I):
         end_str += f" {tz}"
     if year_ctx and not re.search(r"\b\d{4}\b", end_str):
         end_str += f" {year_ctx}"
 
     return parse_dt_utc(start_str), parse_dt_utc(end_str)
-
-
-def count_date_lines(node) -> int:
-    try:
-        txt = node.get_text(" ", strip=True)
-        return len(re.findall(DATE_LINE_RE, txt or ""))
-    except Exception:
-        return 0
-
-
-def find_cards(soup: BeautifulSoup):
-    """
-    Un 'card' es el <div> más cercano cuyo texto contiene EXACTAMENTE 1 línea
-    de fecha. Filtramos aquellos cuyo ancestro (hasta 6 niveles) también
-    tenga exactamente 1 fecha, para quedarnos con el contenedor correcto.
-    """
-    candidates = []
-    for div in soup.find_all("div"):
-        if count_date_lines(div) == 1:
-            candidates.append(div)
-
-    cards = []
-    for c in candidates:
-        anc_has_one = False
-        p = c.parent
-        for _ in range(6):
-            if not p or getattr(p, "name", None) != "div":
-                break
-            if count_date_lines(p) == 1:
-                anc_has_one = True
-                break
-            p = p.parent
-        if not anc_has_one:
-            cards.append(c)
-
-    # quitar duplicados por id
-    seen = set()
-    uniq = []
-    for c in cards:
-        if id(c) not in seen:
-            seen.add(id(c))
-            uniq.append(c)
-    return uniq
-
-
-def anchor_before_date(card):
-    """Devuelve el <a> que aparece ANTES de la línea de fecha dentro del card."""
-    # reconstruimos la fecha como patrón y recorremos en orden de aparición
-    date_txt = None
-    for s in card.stripped_strings:
-        if DATE_LINE_RE.search(s):
-            date_txt = s
-            break
-
-    last_a = None
-    for el in card.descendants:
-        if isinstance(el, str):
-            if date_txt and el.strip() and date_txt in el:
-                break
-            continue
-        if getattr(el, "name", None) == "a" and el.has_attr("href"):
-            t = el.get_text(" ", strip=True) or ""
-            if not t:
-                continue
-            if re.search(r"Subscribe To Updates|Support|Filter Components|Qualys|Login|Log in|Terms|Privacy|Guest", t, re.I):
-                continue
-            last_a = el
-    return last_a
 
 
 def qualys_status_from_text(text: str) -> str:
@@ -187,19 +97,140 @@ def qualys_status_from_text(text: str) -> str:
     return "Update"
 
 
-def first_non_scheduled_line_before_date(card_text: str) -> str:
-    lines = [ln.strip() for ln in (card_text or "").split("\n") if ln.strip()]
-    title = None
-    for ln in lines:
-        if DATE_LINE_RE.search(ln):
+def anchor_before_date(card: BeautifulSoup, date_text: str):
+    """Devuelve el <a> que aparece ANTES de la línea de fecha dentro del card."""
+    last_a = None
+    reached_date = False
+    for el in card.descendants:
+        if isinstance(el, str):
+            if date_text and el.strip() and date_text in el:
+                reached_date = True
+                break
+            continue
+        if getattr(el, "name", None) == "a" and el.has_attr("href"):
+            t = el.get_text(" ", strip=True) or ""
+            if not t:
+                continue
+            if re.search(r"Subscribe To Updates|Support|Filter Components|Qualys|Login|Log in|Terms|Privacy|Guest", t, re.I):
+                continue
+            last_a = el
+    return last_a
+
+
+def find_cards_dom(soup: BeautifulSoup):
+    """
+    Busca divs que contengan exactamente UNA línea de fecha (card),
+    evitando ancestros demasiado grandes (mes completo).
+    """
+    def count_date_lines(node) -> int:
+        try:
+            txt = node.get_text(" ", strip=True)
+            return len(re.findall(DATE_LINE_RE, txt or ""))
+        except Exception:
+            return 0
+
+    candidates = []
+    for div in soup.find_all("div"):
+        if count_date_lines(div) == 1:
+            # descarta si algún ancestro cercano también tiene exactamente 1 (contendor de mes)
+            anc = div.parent
+            too_big = False
+            for _ in range(6):
+                if not anc or getattr(anc, "name", None) != "div":
+                    break
+                if count_date_lines(anc) == 1:
+                    too_big = True
+                    break
+                anc = anc.parent
+            if not too_big:
+                candidates.append(div)
+
+    # dedup
+    seen = set()
+    out = []
+    for c in candidates:
+        if id(c) not in seen:
+            seen.add(id(c))
+            out.append(c)
+    return out
+
+
+def fallback_cards_from_lines(soup: BeautifulSoup):
+    """
+    Fallback por texto puro:
+    - Recorre líneas.
+    - Mantiene el año del encabezado 'June 2025'.
+    - Cuando ve una línea de fechas, toma como título la primera línea
+      previa válida (no Scheduled ni frases de estado).
+    """
+    text = soup.get_text("\n", strip=True)
+    lines = [ln for ln in text.split("\n")]
+    items = []
+    current_year = None
+
+    i = 0
+    while i < len(lines):
+        line = lines[i].strip()
+        # Captura encabezado de mes -> año de contexto
+        mh = MONTH_HEADER_RE.match(line)
+        if mh:
+            current_year = int(mh.group(2))
+            i += 1
+            continue
+
+        m = DATE_LINE_RE.search(line)
+        if not m:
+            i += 1
+            continue
+
+        # Tenemos una línea de fecha; buscamos título hacia atrás
+        title = None
+        back = i - 1
+        while back >= 0 and (i - back) <= 6:  # mira hasta 6 líneas atrás
+            cand = lines[back].strip()
+            if not cand:
+                back -= 1
+                continue
+            if cand.startswith("[Scheduled]") or "scheduled maintenance" in cand.lower():
+                title = None  # card programado -> descartar
+                break
+            if re.search(r"has been resolved|has been mitigated|has been completed", cand, re.I):
+                back -= 1
+                continue
+            # Evita encabezados tipo "June 2025"
+            if MONTH_HEADER_RE.match(cand):
+                back -= 1
+                continue
+            title = cand
             break
-        if ln.startswith("[Scheduled]") or "scheduled maintenance" in ln.lower():
+
+        if title:
+            # Busca un href cuyo texto coincida (si existe)
+            url = None
+            a = soup.find("a", string=re.compile(re.escape(title), re.I))
+            if a and a.has_attr("href"):
+                href = a.get("href", "")
+                url = href if href.startswith("http") else f"https://status.qualys.com{href}" if href.startswith("/") else href
+
+            start, end = parse_date_range_with_year(line, current_year)
+            items.append({
+                "title": title,
+                "status": qualys_status_from_text("\n".join(lines[max(0, back): i+1])),
+                "url": url,
+                "started_at": start,
+                "ended_at": end,
+                "raw_text": "\n".join(lines[max(0, back): i+1]),
+            })
+        i += 1
+
+    # filtra programados por si se coló alguno
+    final = []
+    for it in items:
+        raw = (it.get("raw_text") or "").lower()
+        if "[scheduled]" in raw or "scheduled maintenance" in raw:
             continue
-        if re.search(r"has been resolved|has been mitigated|has been completed", ln, re.I):
-            continue
-        title = ln
-        break
-    return title or "Qualys Incident"
+        final.append(it)
+    return final
 
 
 def analizar_qualys(driver):
@@ -217,42 +248,74 @@ def analizar_qualys(driver):
 
     soup = BeautifulSoup(html, "lxml")
 
+    # 1) Intento por DOM (cards con 1 línea de fecha)
     items = []
-    for card in find_cards(soup):
+    for card in find_cards_dom(soup):
         card_text = card.get_text("\n", strip=True)
 
-        # Ignorar SOLO si el card es programado
+        # Ignora programados a nivel de card
         if "[Scheduled]" in card_text or "scheduled maintenance" in card_text.lower():
             continue
 
-        a = anchor_before_date(card)
-        if a:
-            title = a.get_text(" ", strip=True)
-            href = a.get("href", "")
-            url = href if href.startswith("http") else f"https://status.qualys.com{href}" if href.startswith("/") else href
-        else:
-            title = first_non_scheduled_line_before_date(card_text)
-            url = None
+        # Año de contexto desde encabezado cercano
+        year_ctx = None
+        anc = card
+        for _ in range(8):
+            if not anc:
+                break
+            txt = anc.get_text(" ", strip=True)
+            mhy = MONTH_HEADER_RE.search(txt or "")
+            if mhy:
+                year_ctx = int(mhy.group(2))
+                break
+            anc = getattr(anc, "parent", None)
 
-        status = qualys_status_from_text(card_text)
-
-        # Fechas
+        # fecha (primer match del card)
         m_line = DATE_LINE_RE.search(card_text or "")
         started_at = ended_at = None
+        date_line = None
         if m_line:
             date_line = m_line.group(0)
-            started_at, ended_at = parse_date_range(date_line, card)
+            started_at, ended_at = parse_date_range_with_year(date_line, year_ctx)
 
-        items.append({
-            "title": title,
-            "status": status,
-            "url": url,
-            "started_at": started_at,
-            "ended_at": ended_at,
-            "raw_text": card_text,
-        })
+        # Título + URL (ancla antes de la fecha)
+        title = None
+        url = None
+        if date_line:
+            a = anchor_before_date(card, date_line)
+            if a:
+                title = a.get_text(" ", strip=True)
+                href = a.get("href", "")
+                url = href if href.startswith("http") else f"https://status.qualys.com{href}" if href.startswith("/") else href
 
-    # Ordenar por fin/inicio desc
+        if not title:
+            # Fallback: primera línea previa válida
+            lines = [ln.strip() for ln in (card_text or "").split("\n") if ln.strip()]
+            for ln in lines:
+                if DATE_LINE_RE.search(ln):
+                    break
+                if ln.startswith("[Scheduled]") or "scheduled maintenance" in ln.lower():
+                    continue
+                if re.search(r"has been resolved|has been mitigated|has been completed", ln, re.I):
+                    continue
+                title = ln
+                break
+
+        if title:
+            items.append({
+                "title": title,
+                "status": qualys_status_from_text(card_text),
+                "url": url,
+                "started_at": started_at,
+                "ended_at": ended_at,
+                "raw_text": card_text,
+            })
+
+    # 2) Fallback por líneas si no hay nada
+    if not items:
+        items = fallback_cards_from_lines(soup)
+
+    # Ordenamos por fin/inicio desc
     def sort_key(i):
         return (
             i.get("ended_at") or i.get("started_at") or datetime.min.replace(tzinfo=timezone.utc),
