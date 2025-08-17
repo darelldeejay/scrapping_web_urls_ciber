@@ -1,4 +1,4 @@
-name: Web Status Monitor
+name: Web Status Monitor_test1
 
 on:
   workflow_dispatch:
