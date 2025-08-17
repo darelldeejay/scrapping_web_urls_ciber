@@ -19,9 +19,7 @@ SAVE_HTML = os.getenv("SAVE_HTML", "0") == "1"
 
 MONTHS = "Jan|Feb|Mar|Apr|May|Jun|Jul|Aug|Sep|Oct|Nov|Dec|Ene|Feb|Mar|Abr|May|Jun|Jul|Ago|Sep|Oct|Nov|Dic"
 
-# Ejemplos:
-# "Aug 11, 10:01 - 14:00 PDT"
-# "Jul 7, 22:31 - Jul 8, 06:30 PDT"
+# "Aug 11, 10:01 - 14:00 PDT"  |  "Jul 7, 22:31 - Jul 8, 06:30 PDT"
 DATE_LINE_RE = re.compile(
     rf"\b({MONTHS})\s+\d{{1,2}},\s+\d{{1,2}}:\d{{2}}\s*-\s*(?:({MONTHS})\s+\d{{1,2}},\s+)?\d{{1,2}}:\d{{2}}\s*(UTC|GMT|[A-Z]{{2,4}})\b",
     re.I,
@@ -59,7 +57,7 @@ def parse_dt_utc(s: str):
 def nearest_month_year(node):
     """Busca el 'August 2025' más cercano hacia arriba/atrás para completar el año en líneas sin año."""
     cur = node
-    for _ in range(10):
+    for _ in range(12):
         sib = getattr(cur, "previous_sibling", None)
         while sib:
             if getattr(sib, "get_text", None):
@@ -80,12 +78,7 @@ def nearest_month_year(node):
 
 
 def parse_date_range(line_text: str, node_for_context):
-    """
-    Convierte:
-        'Aug 11, 10:01 - 14:00 PDT'
-        'Jul 7, 22:31 - Jul 8, 06:30 PDT'
-    a (start_utc, end_utc)
-    """
+    """Convierte 'Aug 11, 10:01 - 14:00 PDT' a (start_utc, end_utc)."""
     m = DATE_LINE_RE.search(line_text or "")
     if not m:
         return None, None
@@ -106,10 +99,7 @@ def parse_date_range(line_text: str, node_for_context):
         end_str = right
     else:
         md = re.match(rf"\b({MONTHS})\s+(\d{{1,2}}),\s*\d{{1,2}}:\d{{2}}", left, flags=re.I)
-        if md:
-            end_str = f"{md.group(1)} {md.group(2)}, {right}"
-        else:
-            end_str = right
+        end_str = f"{md.group(1)} {md.group(2)}, {right}" if md else right
     if not re.search(r"\b(UTC|GMT|[A-Z]{2,4})\b", end_str, flags=re.I):
         end_str += f" {tz}"
     if year_ctx and not re.search(r"\b\d{4}\b", end_str):
@@ -119,13 +109,11 @@ def parse_date_range(line_text: str, node_for_context):
 
 
 def is_card_container(node):
-    """Heurística: un contenedor de tarjeta tiene un <a> de título y una línea de fecha."""
+    """Un card válido es cualquier bloque que contenga UNA línea de fecha tipo 'Aug 11, 10:01 - 14:00 PDT'."""
     if not getattr(node, "get_text", None):
         return False
     txt = node.get_text(" ", strip=True)
-    has_date = DATE_LINE_RE.search(txt or "") is not None
-    has_link = bool(node.select("a[href]"))
-    return has_date and has_link
+    return DATE_LINE_RE.search(txt or "") is not None
 
 
 def collect_cards(soup: BeautifulSoup):
@@ -137,26 +125,26 @@ def collect_cards(soup: BeautifulSoup):
         except Exception:
             continue
     if not cards:
-        for a in soup.select("a[href]"):
-            parent = a
-            for _ in range(4):
-                parent = getattr(parent, "parent", None)
-                if not parent:
+        for el in soup.find_all(string=DATE_LINE_RE):
+            node = el.parent
+            for _ in range(5):
+                node = getattr(node, "parent", None)
+                if not node:
                     break
-                if is_card_container(parent):
-                    cards.append(parent)
+                if is_card_container(node):
+                    cards.append(node)
                     break
-    return cards
+    # quita duplicados
+    seen = set()
+    uniq = []
+    for c in cards:
+        if id(c) not in seen:
+            seen.add(id(c))
+            uniq.append(c)
+    return uniq
 
 
 def qualys_status_from_text(text: str) -> str:
-    """
-    Estados propios de esta vista de histórico:
-    - 'This incident has been resolved.' -> Resolved
-    - 'has been mitigated' -> Mitigated
-    - 'service disruption'/'degraded'/'impact' sin resolver -> Incident
-    - Por defecto -> Update
-    """
     low = (text or "").lower()
     if "has been resolved" in low or re.search(r"\bresolved\b", low):
         return "Resolved"
@@ -167,31 +155,56 @@ def qualys_status_from_text(text: str) -> str:
     return "Update"
 
 
+def anchor_before_date(card):
+    """Devuelve el <a href> que aparece ANTES de la línea de fecha dentro del card."""
+    date_node = card.find(string=DATE_LINE_RE)
+    last_a = None
+    for el in card.descendants:
+        if el == date_node:
+            break
+        if getattr(el, "name", None) == "a" and el.has_attr("href"):
+            t = el.get_text(" ", strip=True) or ""
+            if not t:
+                continue
+            if re.search(r"Subscribe To Updates|Support|Filter Components|Qualys|Login|Log in|Terms|Privacy|Guest", t, re.I):
+                continue
+            last_a = el
+    return last_a
+
+
+def derive_title(card, card_text: str) -> str:
+    """Título por fallback: primera línea relevante antes de la fecha."""
+    lines = [ln.strip() for ln in (card_text or "").split("\n") if ln.strip()]
+    for ln in lines:
+        if DATE_LINE_RE.search(ln):
+            break
+        if ln.startswith("[Scheduled]") or "scheduled maintenance" in ln.lower():
+            continue
+        if re.search(r"has been resolved|has been mitigated|has been completed", ln, re.I):
+            continue
+        return ln
+    return "Qualys Incident"
+
+
 def extract_incidents(cards):
     incidents = []
     for card in cards:
-        # Anchor principal (título)
-        a = None
-        for cand in card.select("a[href]"):
-            t = cand.get_text(" ", strip=True) or ""
-            if re.search(r"Subscribe To Updates|Support|Filter Components|Qualys|Login|Log in|Terms|Privacy|Guest", t, re.I):
-                continue
-            if not a or len(t) > len(a.get_text(" ", strip=True) or ""):
-                a = cand
-        if not a:
-            continue
-
-        title = a.get_text(" ", strip=True)
+        card_text = card.get_text("\n", strip=True)
 
         # IGNORAR todo lo programado
-        card_text = card.get_text("\n", strip=True)
-        if title.startswith("[Scheduled]") or "[Scheduled]" in card_text or "scheduled maintenance" in card_text.lower():
+        if "[Scheduled]" in card_text or "scheduled maintenance" in card_text.lower():
             continue
 
-        href = a.get("href", "")
-        url = href if href.startswith("http") else f"https://status.qualys.com{href}" if href.startswith("/") else href
+        # Título + URL: ancla antes de la fecha si existe
+        a = anchor_before_date(card)
+        if a:
+            title = a.get_text(" ", strip=True)
+            href = a.get("href", "")
+            url = href if href.startswith("http") else f"https://status.qualys.com{href}" if href.startswith("/") else href
+        else:
+            title = derive_title(card, card_text)
+            url = None
 
-        # Estado propio de esta vista
         status = qualys_status_from_text(card_text)
 
         # Línea de fecha
@@ -229,8 +242,7 @@ def analizar_qualys(driver):
     cards = collect_cards(soup)
     items = extract_incidents(cards)
 
-    # Esta URL es de histórico: devolvemos TODO lo visible (sin filtro de días)
-    # Ordenamos por fecha (fin -> inicio -> título) descendente
+    # Devolvemos TODO lo visible (histórico por meses), ordenado por fin/inicio
     def sort_key(i):
         return (
             i.get("ended_at") or i.get("started_at") or datetime.min.replace(tzinfo=timezone.utc),
@@ -254,9 +266,7 @@ def format_message(items):
         edt = inc.get("ended_at")
         s_s = sdt.strftime("%Y-%m-%d %H:%M UTC") if sdt else "N/D"
         e_s = edt.strftime("%Y-%m-%d %H:%M UTC") if edt else "N/D"
-        title_line = f"{idx}. {t}"
-        if u:
-            title_line = f'{idx}. <a href="{u}">{t}</a>'
+        title_line = f"{idx}. {t}" if not u else f'{idx}. <a href="{u}">{t}</a>'
         lines.append(title_line)
         lines.append(f"   Estado: {st} · Inicio: {s_s} · Fin: {e_s}")
     return "\n".join(lines)
