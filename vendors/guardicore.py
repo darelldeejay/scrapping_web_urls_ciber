@@ -6,6 +6,7 @@ import traceback
 from datetime import datetime
 
 from bs4 import BeautifulSoup
+from selenium.common.exceptions import TimeoutException
 from selenium.webdriver.common.by import By
 from selenium.webdriver.support.ui import WebDriverWait
 from selenium.webdriver.support import expected_conditions as EC
@@ -31,7 +32,10 @@ def wait_for_page(driver):
     WebDriverWait(driver, 25).until(EC.presence_of_element_located((By.TAG_NAME, "body")))
     # Espera a que cargue algo propio de la página (checks/incidents)
     for _ in range(60):
-        body = driver.find_element(By.TAG_NAME, "body").text
+        try:
+            body = driver.find_element(By.TAG_NAME, "body").text
+        except Exception:
+            body = ""
         text = collapse_ws(body)
         if ("past incidents" in text.lower()
             or "components" in text.lower()
@@ -208,24 +212,21 @@ def format_message(checks, today_inc):
     # Checks
     lines.append("Checks")
     if checks:
-        # Si todos están Operational, confírmalo y muestra el total.
         if all(OPERATIONAL_RE.search(c["status"]) for c in checks):
             lines.append("- All checks Operational")
         else:
             for c in checks:
                 lines.append(f"- {c['name']}: {c['status']}")
     else:
-        # Si no detectamos estructura de checks, al menos no inventar nada
         lines.append("- (No checks found)")
 
-    # Incidents today (sin repetir la fecha ni “— 0 incident(s)”)
+    # Incidents today
     lines.append("")
     lines.append("Incidents today")
     if today_inc.get("count", 0) > 0:
         for line in today_inc["items"]:
             lines.append(line)
     else:
-        # Si vino el literal, úsalo; si no, fallback
         items = today_inc.get("items") or []
         if items:
             for it in items:
@@ -240,8 +241,26 @@ def format_message(checks, today_inc):
 def run():
     driver = start_driver()
     try:
-        driver.get(URL)
-        wait_for_page(driver)
+        # Evita cuelgues del renderer en páginas pesadas
+        try:
+            driver.set_page_load_timeout(45)
+        except Exception:
+            pass
+
+        try:
+            driver.get(URL)
+        except TimeoutException:
+            print("⏱️ Page load timed out — using partial DOM (window.stop()).")
+            try:
+                driver.execute_script("window.stop();")
+            except Exception:
+                pass
+
+        # Intenta esperar al contenido, pero si falla sigue igualmente
+        try:
+            wait_for_page(driver)
+        except Exception:
+            print("⚠️ Could not confirm page readiness, proceeding with available DOM.")
 
         html = driver.page_source
         if SAVE_HTML:
@@ -265,10 +284,14 @@ def run():
         send_teams(msg)
 
     except Exception as e:
-        print(f"[guardicore] ERROR: {e}")
+        # Mensaje de error corto para Telegram (evita 400 por exceso de longitud)
+        short = f"{type(e).__name__}: {str(e)}"
+        if len(short) > 300:
+            short = short[:300] + "…"
+        print(f"[guardicore] ERROR: {short}")
         traceback.print_exc()
-        send_telegram(f"Akamai (Guardicore) - Monitor\nError:\n{str(e)}")
-        send_teams(f"❌ Akamai (Guardicore) - Monitor\nError: {str(e)}")
+        send_telegram(f"Akamai (Guardicore) - Monitor\nError: {short}")
+        send_teams(f"❌ Akamai (Guardicore) - Monitor\nError: {short}")
         raise
     finally:
         try:
