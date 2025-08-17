@@ -30,8 +30,7 @@ jobs:
       - name: Instalar Chromium y Chromedriver
         run: |
           sudo apt-get update
-          sudo apt-get install -y chromium-browser chromium-chromedriver
-          sudo ln -sf /usr/lib/chromium-browser/chromedriver /usr/bin/chromedriver
+          sudo apt-get install -y chromium-browser chromium-chromedriver || true
 
       - name: Ejecutar script principal
         run: python main.py
