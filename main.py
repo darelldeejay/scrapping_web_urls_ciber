@@ -178,8 +178,8 @@ def parse_datetime_any(text: str):
 
 def find_section_container(soup: BeautifulSoup, keywords: list[str]):
     """
-    Devuelve el contenedor de la sección cuyo heading contiene alguna de las keywords.
-    Sin fallback global: si no hay heading, devuelve None.
+    Devuelve el contenedor del heading que contiene alguna keyword.
+    Si no hay heading, devuelve None (no usamos fallback global aquí).
     """
     heading = None
     for kw in keywords:
@@ -199,47 +199,79 @@ def find_section_container(soup: BeautifulSoup, keywords: list[str]):
 
 
 def cards_in_container(container: BeautifulSoup):
+    """
+    Busca tarjetas dentro del contenedor y, si no hay, recorre los siguientes
+    hermanos hasta encontrar tarjetas o toparse con otro heading.
+    """
     if not container:
         return []
     cards = container.select(".incident, [class*='incident'], a[href*='/incidents/']")
-    if not cards:
-        nxt = container.find_next_sibling()
-        if nxt:
-            cards = nxt.select(".incident, [class*='incident'], a[href*='/incidents/']")
-    return cards
+    if cards:
+        return cards
+    # Explora siblings (la página coloca h5 de fecha y luego el div de tarjetas)
+    out = []
+    for sib in container.next_siblings:
+        if not hasattr(sib, "get_text"):
+            continue
+        # Si llegamos a otro heading principal, paramos
+        if sib.name in ["h1", "h2", "h3", "h4", "summary"]:
+            break
+        out.extend(sib.select(".incident, [class*='incident'], a[href*='/incidents/']"))
+        if out:
+            break
+    return out
 
 
 def extract_sections_strict(soup: BeautifulSoup):
     """
-    Devuelve (cards_open, cards_past) separando con precisión según los headings.
-    - Open Incidents: estricto (si no hay, lista vacía).
-    - Past Incidents: busca su contenedor; si no encuentra, intenta un fallback suave.
+    Devuelve (cards_open, cards_past) separando por headings.
+    Recorremos TODOS los next_siblings del heading de 'Past' hasta topar
+    con otro heading “grande”, acumulando tarjetas en el camino.
     """
-    open_container = find_section_container(soup, ["Open Incidents", "Active Incidents", "Active", "Current incidents"])
-    past_container = find_section_container(soup, ["Past Incidents (Previous 15 days)", "Past Incidents", "Previous 15 days"])
-
+    # Open = estricto
+    open_container = find_section_container(
+        soup,
+        ["Open Incidents", "Active Incidents", "Active", "Current incidents"]
+    )
     open_cards = cards_in_container(open_container) if open_container else []
-    past_cards = cards_in_container(past_container)
 
-    # Si no encontró contenedor de past, último recurso: cualquier card bajo un heading que contenga "Past"
-    if not past_cards:
-        alt_heading = soup.find(lambda tag: tag.name in ["h1","h2","h3","h4","div","summary"]
-                                and "past" in tag.get_text(strip=True).lower())
-        if alt_heading:
-            past_cards = cards_in_container(alt_heading.find_next_sibling())
+    # Past = heading + barrido de siblings
+    past_heading = None
+    for kw in ["Past Incidents (Previous 15 days)", "Past Incidents", "Previous 15 days"]:
+        past_heading = soup.find(
+            lambda tag: tag.name in ["h1", "h2", "h3", "h4", "div", "summary"]
+            and tag.get_text(strip=True)
+            and kw.lower() in tag.get_text(strip=True).lower()
+        )
+        if past_heading:
+            break
+
+    past_cards = []
+    if past_heading:
+        for sib in past_heading.next_siblings:
+            if not hasattr(sib, "get_text"):
+                continue
+            if sib.name in ["h1", "h2", "h3", "h4", "summary"]:
+                txt = sib.get_text(strip=True).lower()
+                if any(x in txt for x in ["open incidents", "maintenance", "status", "home"]):
+                    break
+            past_cards.extend(sib.select(".incident, [class*='incident'], a[href*='/incidents/']"))
+
+        # Fallback suave
+        if not past_cards:
+            cont = past_heading.find_next_sibling()
+            past_cards = cards_in_container(cont)
 
     return open_cards, past_cards
 
 
 def nearest_date_after(label_text: str, full_text: str):
-    """
-    Busca la primera fecha después de la ocurrencia de label_text (p.ej. 'Resolved').
-    """
+    """Primera fecha tras la ocurrencia de label_text (p.ej., 'Resolved')."""
     try:
         pos = full_text.lower().find(label_text.lower())
         if pos == -1:
             return None
-        window = full_text[pos: pos + 400]  # ventana razonable
+        window = full_text[pos: pos + 400]
         m = re.search(DATE_REGEX, window, flags=re.I)
         if m:
             return parse_datetime_any(m.group(0))
@@ -251,9 +283,8 @@ def nearest_date_after(label_text: str, full_text: str):
 def normalize_card(card) -> dict:
     """
     Convierte un nodo de incidente a dict estándar.
-    Reglas clave:
-    - Si aparece 'Resolved' en la cronología, status='Resolved' y ended_at=fecha cercana a 'Resolved'.
-    - started_at: intenta primera fecha del bloque; si no, cualquiera encontrada.
+    - Si aparece 'Resolved' en la cronología, status='Resolved' y ended_at≈fecha de 'Resolved'.
+    - started_at: intenta primera fecha del bloque; si no, la más antigua encontrada.
     """
     text = card.get_text(separator=" ", strip=True)
     url = None
@@ -277,24 +308,23 @@ def normalize_card(card) -> dict:
     if not title:
         title = " ".join((text or "").split()[:14]) or "Netskope Incident"
 
-    # Fechas del contenido
+    # Fechas
     started_at = None
     ended_at = None
 
-    # 1) <time> tags (si existen)
+    # <time> tags
     times = card.find_all("time")
     parsed_times = []
     for t in times:
         dt = parse_datetime_any(t.get("datetime") or t.get_text(strip=True))
         if dt:
             parsed_times.append(dt)
-
     if parsed_times:
         parsed_times.sort()
         started_at = parsed_times[0]
         ended_at = parsed_times[-1]
 
-    # 2) Regex en texto completo
+    # Regex de respaldo
     if not started_at or not ended_at:
         all_dates = [parse_datetime_any(m.group(0)) for m in re.finditer(DATE_REGEX, text or "", flags=re.I)]
         all_dates = [d for d in all_dates if d]
@@ -303,20 +333,17 @@ def normalize_card(card) -> dict:
         if all_dates and not ended_at:
             ended_at = max(all_dates)
 
-    # 3) Si hay 'Resolved', priorizar su fecha como ended_at
+    # Estado
     status = None
     if "resolved" in (text or "").lower():
         status = "Resolved"
         resolved_dt = nearest_date_after("Resolved", text)
         if resolved_dt:
             ended_at = resolved_dt
-
-    # Si aún no hay status, toma el primer token de estado que aparezca en el texto (orden de prioridad)
     if not status:
         for tok in STATUS_TOKENS:
             if tok.lower() in (text or "").lower():
                 status = tok
-                # si es 'Update', intenta al menos asignar fecha más reciente como ended_at
                 break
     if not status:
         status = "Update"
@@ -367,18 +394,15 @@ def analizar_netskope(driver: webdriver.Chrome) -> tuple[list[dict], list[dict]]
 
     soup = BeautifulSoup(html, "lxml")
 
-    # Separa con precisión por secciones
     open_cards, past_cards = extract_sections_strict(soup)
 
-    # Normaliza
     activos = [normalize_card(c) for c in open_cards]
     pasados = [normalize_card(c) for c in past_cards]
 
-    # Dedup dentro de cada sección
     activos = dedup_incidents(activos)
     pasados = dedup_incidents(pasados)
 
-    # Filtra 'pasados' a ventana de 15 días
+    # Filtra 'pasados' a 15 días
     now = datetime.utcnow().replace(tzinfo=timezone.utc)
     cutoff = now - timedelta(days=LOOKBACK_DAYS)
 
@@ -390,7 +414,7 @@ def analizar_netskope(driver: webdriver.Chrome) -> tuple[list[dict], list[dict]]
 
     pasados_15 = [i for i in pasados if in_lookback(i)]
 
-    # IMPORTANTE: no marcar como activos los que estén Resolved
+    # No marcar como activos los 'Resolved'
     activos = [i for i in activos if (i.get("status") or "").lower() != "resolved"]
 
     return activos, pasados_15
