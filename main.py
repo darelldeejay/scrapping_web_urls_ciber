@@ -150,7 +150,13 @@ def expandir_past_incidents(driver: webdriver.Chrome) -> None:
 # Parsing helpers
 # =========================
 MONTHS = "Jan|Feb|Mar|Apr|May|Jun|Jul|Aug|Sep|Oct|Nov|Dec|Ene|Feb|Mar|Abr|May|Jun|Jul|Ago|Sep|Oct|Nov|Dic"
-DATE_REGEX = rf"({MONTHS})\s+\d{{1,2}},?\s+\d{{4}}(?:\s+\d{{1,2}}:\d{{2}}\s*(AM|PM)?)?\s*(UTC|GMT|[A-Z]{{2,4}})?"
+
+# Estricto (con año) — lo dejamos por compatibilidad, pero usaremos el 'LOOSE'
+DATE_REGEX_STRICT = rf"({MONTHS})\s+\d{{1,2}},?\s+\d{{4}}(?:\s+\d{{1,2}}:\d{{2}}\s*(AM|PM)?)?\s*(UTC|GMT|[A-Z]{{2,4}})?"
+
+# Flexible (sin exigir año, hora opcional) — se usa por defecto
+DATE_REGEX_LOOSE = rf"({MONTHS})\s+\d{{1,2}}(?:,\s*\d{{4}})?(?:\s*,?\s*\d{{1,2}}:\d{{2}}\s*(?:AM|PM)?(?:\s*(?:UTC|GMT|[A-Z]{{2,4}}))?)?"
+
 STATUS_TOKENS = ["Resolved", "Mitigated", "Monitoring", "Identified", "Investigating", "Degraded", "Update"]
 
 
@@ -163,10 +169,10 @@ def parse_datetime_any(text: str):
             return dt.astimezone(timezone.utc)
     except Exception:
         pass
-    m = re.search(DATE_REGEX, text or "", flags=re.I)
+    m = re.search(DATE_REGEX_LOOSE, text or "", flags=re.I)
     if m:
         try:
-            dt = dateparser.parse(m.group(0))
+            dt = dateparser.parse(m.group(0), fuzzy=True)
             if dt:
                 if dt.tzinfo is None:
                     return dt.replace(tzinfo=timezone.utc)
@@ -182,8 +188,8 @@ def nearest_date_after(label_text: str, full_text: str):
         pos = full_text.lower().find(label_text.lower())
         if pos == -1:
             return None
-        window = full_text[pos: pos + 400]
-        m = re.search(DATE_REGEX, window, flags=re.I)
+        window = full_text[pos: pos + 500]
+        m = re.search(DATE_REGEX_LOOSE, window, flags=re.I)
         if m:
             return parse_datetime_any(m.group(0))
     except Exception:
@@ -328,7 +334,6 @@ def normalize_card(card) -> dict:
     """
     Normaliza una tarjeta de incidente:
     - Título: del <a href="/incidents/..."> cuyo texto contiene "Incident <id>".
-      (evita tomar el <div class="title"> del timeline: Resolved/Update…)
     - Fechas: inicio = Investigating/Identified ; fin = Resolved (si existe).
     - Estado: prioriza 'Resolved'; luego Mitigated/Monitoring/Identified/Investigating/Degraded/Update.
     """
@@ -337,7 +342,7 @@ def normalize_card(card) -> dict:
     if getattr(card, "name", None) == "a":
         container = incident_container_for(card)
 
-    # 2) URL y título preferidos del enlace de encabezado del incidente
+    # 2) URL y título (preferir enlace principal del incidente)
     url = None
     incident_link = None
     for a in container.find_all("a", href=True):
@@ -385,8 +390,8 @@ def normalize_card(card) -> dict:
         started_at = parsed_times[0]
         ended_at = parsed_times[-1]
 
-    # 4.2 Regex libre
-    all_dates = [parse_datetime_any(m.group(0)) for m in re.finditer(DATE_REGEX, text or "", flags=re.I)]
+    # 4.2 Regex libre (acepta sin año)
+    all_dates = [parse_datetime_any(m.group(0)) for m in re.finditer(DATE_REGEX_LOOSE, text or "", flags=re.I)]
     all_dates = [d for d in all_dates if d]
 
     # Inicio = tras 'Investigating' o 'Identified' ; si no, la más antigua
