@@ -1,4 +1,5 @@
 import time
+import os
 from datetime import datetime, timedelta
 from selenium import webdriver
 from selenium.webdriver.chrome.options import Options
@@ -6,10 +7,10 @@ from selenium.webdriver.common.by import By
 import requests
 from shutil import which
 
-# === CONFIGURACIÓN ===
-TELEGRAM_TOKEN = "TU_TOKEN"
-TELEGRAM_CHAT_ID = "TU_CHAT_ID"
-TEAMS_WEBHOOK_URL = "TU_WEBHOOK"  # opcional
+# === CONFIGURACIÓN DESDE VARIABLES DE ENTORNO ===
+TELEGRAM_TOKEN = os.getenv("TELEGRAM_TOKEN")
+TELEGRAM_CHAT_ID = os.getenv("TELEGRAM_CHAT_ID")
+TEAMS_WEBHOOK_URL = os.getenv("TEAMS_WEBHOOK", "")
 
 URL_NETSKOPE = "https://trust.netskope.com/"
 
@@ -18,7 +19,7 @@ def iniciar_driver():
     options.add_argument("--headless=new")
     options.add_argument("--disable-dev-shm-usage")
     options.add_argument("--no-sandbox")
-    options.add_argument("--user-data-dir=/tmp/chrome-data")  # evitar conflicto de perfiles
+    options.add_argument("--user-data-dir=/tmp/chrome-data")  # evitar error de perfil duplicado
     options.binary_location = (
         which("chromium-browser") or which("chromium") or which("google-chrome")
     )
@@ -65,6 +66,9 @@ def analizar_netskope(driver):
     return resumen
 
 def enviar_telegram(mensaje):
+    if not TELEGRAM_TOKEN or not TELEGRAM_CHAT_ID:
+        print("⚠️ TELEGRAM_TOKEN o CHAT_ID no configurados.")
+        return
     url = f"https://api.telegram.org/bot{TELEGRAM_TOKEN}/sendMessage"
     data = {
         "chat_id": TELEGRAM_CHAT_ID,
@@ -75,7 +79,8 @@ def enviar_telegram(mensaje):
     print("Telegram:", response.text)
 
 def enviar_teams(mensaje):
-    if not TEAMS_WEBHOOK_URL.strip():
+    if not TEAMS_WEBHOOK_URL or not TEAMS_WEBHOOK_URL.startswith("http"):
+        print("⏭ Webhook de Teams no configurado.")
         return
     data = {"text": mensaje}
     r = requests.post(TEAMS_WEBHOOK_URL, json=data)
