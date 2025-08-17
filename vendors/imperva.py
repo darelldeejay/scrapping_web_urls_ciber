@@ -15,9 +15,8 @@ from common.notify import send_telegram, send_teams
 
 URL = "https://status.imperva.com/"
 SAVE_HTML = os.getenv("SAVE_HTML", "0") == "1"
-DAY_BLOCK_LIMIT = int(os.getenv("IMPERVA_DAY_LIMIT", "2"))  # nº de días a listar (por defecto 2)
 
-# Estados problemáticos típicos de Statuspage
+# Estados problemáticos típicos (Statuspage)
 ISSUE_STATUS_RE = re.compile(r"(Degraded Performance|Partial Outage|Major Outage|Under Maintenance)", re.I)
 OPERATIONAL_RE = re.compile(r"\bOperational\b", re.I)
 NO_INCIDENTS_TODAY_RE = re.compile(r"No incidents reported today", re.I)
@@ -42,162 +41,216 @@ def wait_for_page(driver):
             return
         time.sleep(0.5)
 
+# ---------- POPs (heurística) ----------
+
+# pistas textuales
+POP_HINTS = re.compile(
+    r"\b(POP|PoP|Point of Presence|Location\(s\)|Locations|Region\(s\)|Regions|Datacenter|Data Center|Edge|CDN)\b",
+    re.I,
+)
+
+# Códigos de POP habituales: 3-5 letras/números
+POP_CODE = re.compile(r"\b[A-Z0-9]{3,5}\b")
+
+BLACKLIST = {"HTTP", "HTTPS", "CDN", "DNS", "WAF", "API", "EDGE", "CACHE", "SITE", "DATA", "CENTER", "INC"}
+
+def extract_pops_from_text(text: str):
+    """
+    Extrae POPs a partir del texto: busca líneas con "POP(s)/Locations/Regions"
+    y códigos en mayúsculas.
+    """
+    if not text:
+        return []
+    lines = [collapse_ws(x) for x in text.splitlines() if collapse_ws(x)]
+    pops = set()
+    for ln in lines:
+        if POP_HINTS.search(ln) or "pop" in ln.lower():
+            # 1) Tras 'POPs:' o 'Locations:' intenta capturar la cola
+            m = re.search(r"(?:POP[s]?:?|Location[s]?:?|Region[s]?:?)\s*([A-Z0-9,\s/;:-]+)", ln, flags=re.I)
+            if m:
+                chunk = collapse_ws(m.group(1))
+                for token in re.split(r"[,\s/;:-]+", chunk):
+                    tok = token.strip().upper()
+                    if POP_CODE.fullmatch(tok) and tok not in BLACKLIST:
+                        pops.add(tok)
+            # 2) Códigos mayúsculos aislados
+            for m2 in POP_CODE.finditer(ln):
+                tok = m2.group(0).upper()
+                if tok not in BLACKLIST:
+                    pops.add(tok)
+    return sorted(pops)[:12]
+
+def extract_pops_from_component(comp):
+    """
+    Si el componente agrupa POPs (sub-listas), intenta leerlos del DOM del componente.
+    """
+    pops = set()
+
+    # List items dentro del componente
+    for li in comp.select("li"):
+        t = collapse_ws(li.get_text(" ", strip=True))
+        for m in POP_CODE.finditer(t):
+            tok = m.group(0).upper()
+            if tok not in BLACKLIST:
+                pops.add(tok)
+
+    # Spans/divs con nombres cortos que parezcan POPs
+    for tag in comp.select("span, div, a"):
+        t = collapse_ws(tag.get_text(" ", strip=True))
+        if 3 <= len(t) <= 5 and t.isupper() and t not in BLACKLIST and POP_CODE.fullmatch(t):
+            pops.add(t)
+
+    return sorted(pops)[:12]
+
 # ---------- Componentes (solo no-operational) ----------
 
 def parse_components(soup: BeautifulSoup):
     """
-    Devuelve lista de (name, status_text) SOLO para componentes NO 'Operational'.
-    Usa preferentemente data-component-status en .component-inner-container si existe.
+    Devuelve lista de dicts:
+      { "name": "...", "status": "Degraded Performance", "pops": [ ... ] }
+    Solo para componentes NO 'Operational'. Si el comp es un grupo de 'EMEA PoPs', intenta sacar los POPs hijos.
     """
     results = []
     cards = soup.select(".components-section .component-inner-container")
     if not cards:
-        # Fallback genérico: busca cualquier bloque con estado problemático
+        # Fallback genérico
         for tag in soup.find_all(True):
             txt = collapse_ws(getattr(tag, "get_text", lambda *a, **k: "")(" ", strip=True))
             m = ISSUE_STATUS_RE.search(txt)
             if m:
                 pos = txt.lower().find(m.group(1).lower())
                 name = collapse_ws(txt[:pos]) if pos > 0 else "Component"
-                results.append((name, m.group(1)))
-    else:
-        for comp in cards:
-            status_attr = (comp.get("data-component-status") or "").strip().lower()
-            name_el = comp.select_one(".name, .component-name, [data-component-name]")
-            status_text_el = comp.select_one(".component-status, .status")
-            name = None
-            if name_el:
-                name = collapse_ws(name_el.get_text(" ", strip=True))
-            if not name and comp.has_attr("data-component-name"):
-                name = collapse_ws(comp["data-component-name"])
-            name = name or "Component"
-            status_text = collapse_ws(status_text_el.get_text(" ", strip=True)) if status_text_el else (status_attr or "Unknown")
+                results.append({"name": name, "status": m.group(1), "pops": []})
+        # dedup básica
+        uniq, seen = [], set()
+        for it in results:
+            key = (it["name"].lower(), it["status"].lower())
+            if key not in seen:
+                seen.add(key)
+                uniq.append(it)
+        return uniq
 
-            # Solo si NO es operational
-            if status_attr == "operational":
-                continue
-            if not status_attr and OPERATIONAL_RE.search(status_text):
-                continue
-            if not OPERATIONAL_RE.search(status_text):
-                results.append((name, status_text))
+    for comp in cards:
+        status_attr = (comp.get("data-component-status") or "").strip().lower()
+        name_el = comp.select_one(".name, .component-name, [data-component-name]")
+        status_text_el = comp.select_one(".component-status, .status")
+        name = None
+        if name_el:
+            name = collapse_ws(name_el.get_text(" ", strip=True))
+        if not name and comp.has_attr("data-component-name"):
+            name = collapse_ws(comp["data-component-name"])
+        name = name or "Component"
+        status_text = collapse_ws(status_text_el.get_text(" ", strip=True)) if status_text_el else (status_attr or "Unknown")
+
+        # Solo si NO es operational
+        if status_attr == "operational":
+            continue
+        if not status_attr and OPERATIONAL_RE.search(status_text):
+            continue
+        if OPERATIONAL_RE.search(status_text):
+            continue
+
+        pops = []
+        # Si parece un grupo de POPs (EMEA/AMER/APAC), intenta sacar códigos
+        if re.search(r"\b(POPs?|EMEA|AMER|APAC|EU|EUROPE|ASIA|AMERICA)\b", name, re.I):
+            pops = extract_pops_from_component(comp)
+            if not pops:
+                pops = extract_pops_from_text(collapse_ws(comp.get_text(" ", strip=True)))
+
+        results.append({"name": name, "status": status_text, "pops": pops})
 
     # dedup
     uniq, seen = [], set()
-    for name, st in results:
-        key = (name.lower(), st.lower())
+    for it in results:
+        key = (it["name"].lower(), it["status"].lower(), tuple(it.get("pops") or []))
         if key not in seen:
             seen.add(key)
-            uniq.append((name, st))
+            uniq.append(it)
     return uniq
 
-# ---------- POPs afectados (heurística) ----------
+# ---------- Incidentes: SOLO el día actual ----------
 
-POP_HINTS = re.compile(
-    r"\b(POP|PoP|Point of Presence|Location\(s\)|Locations|Region\(s\)|Regions|Datacenter|Data Center|Edge|CDN)\b",
-    re.I,
-)
+def today_header_strings():
+    now = datetime.utcnow()
+    with_zero = now.strftime("%b %d, %Y")   # "Aug 07, 2025"
+    no_zero  = with_zero.replace(" 0", " ") # "Aug 7, 2025"
+    return {with_zero, no_zero}
 
-# Códigos de POP habituales (3-5 letras mayúsculas, separadas por comas/espacios)
-POP_CODES = re.compile(r"\b([A-Z]{3,5})(?:\s*[,/]\s*([A-Z]{3,5}))*\b")
-
-def extract_pops(text: str):
+def find_today_day_block(soup: BeautifulSoup):
     """
-    Extrae POPs a partir de líneas con 'POP/Locations/Regions...' o patrones de códigos mayúsculos (LHR, FRA, SJC).
-    Heurística conservadora para no 'inventar' nombres.
+    Busca el bloque .status-day del día actual (por su cabecera de fecha).
     """
-    if not text:
-        return []
-    cand_lines = []
-    for ln in text.splitlines():
-        ln = collapse_ws(ln)
-        if not ln:
-            continue
-        if POP_HINTS.search(ln):
-            cand_lines.append(ln)
-
-    pops = set()
-    for ln in cand_lines:
-        # 1) Busca algo tipo 'POPs: LHR, FRA, SJC'
-        m = re.search(r"(?:POP[s]?:?|Location[s]?:?|Region[s]?:?)\s*([A-Z0-9,\s/-]+)", ln, flags=re.I)
-        if m:
-            chunk = collapse_ws(m.group(1))
-            for code in re.split(r"[,\s/;-]+", chunk):
-                c = code.strip().upper()
-                if re.fullmatch(r"[A-Z0-9]{3,5}", c):
-                    pops.add(c)
-        # 2) Extrae códigos mayúsculos aislados
-        for m2 in re.finditer(r"\b[A-Z]{3,5}\b", ln):
-            pops.add(m2.group(0).upper())
-
-    # Filtra falsos positivos muy genéricos
-    blacklist = {"HTTP", "HTTPS", "CDN", "DNS", "WAF", "API", "EDGE", "CACHE"}
-    pops = [p for p in pops if p not in blacklist]
-    # limita cantidad para que el mensaje sea legible
-    pops = sorted(pops)[:12]
-    return pops
-
-# ---------- Incidents por fecha ----------
-
-def parse_incidents_by_date(soup: BeautifulSoup, day_limit: int = 2):
-    """
-    Devuelve una lista de días, cada uno:
-      { "date": "Aug 17, 2025", "count": N, "incidents": [ "• Resolved — Title (Aug 17, 02:40 PDT) [POPs: LHR, FRA]" ... ] }
-    """
-    out = []
     day_blocks = soup.select(".incidents-list .status-day")
     if not day_blocks:
-        # Fallback: si el sitio solo muestra “All Systems Operational / No incidents...”
-        text = collapse_ws(soup.get_text(" ", strip=True))
-        if NO_INCIDENTS_TODAY_RE.search(text):
-            out.append({"date": "Today", "count": 0, "incidents": ["- No incidents reported today."]})
-        return out
-
-    for day in day_blocks[:max(1, day_limit)]:
-        # Fecha del bloque
+        return None, None
+    candidates = today_header_strings()
+    for day in day_blocks:
+        # fecha visible dentro del bloque
         date_el = day.select_one(".date, h3, h4")
-        date_str = collapse_ws(date_el.get_text(" ", strip=True)) if date_el else "Date"
+        date_str = collapse_ws(date_el.get_text(" ", strip=True)) if date_el else ""
+        if date_str in candidates:
+            return day, date_str
+    # Si la página marca clase 'today', úsala
+    for day in day_blocks:
+        if "today" in (day.get("class") or []):
+            date_el = day.select_one(".date, h3, h4")
+            date_str = collapse_ws(date_el.get_text(" ", strip=True)) if date_el else "Today"
+            return day, date_str
+    return None, None
 
-        # ¿día sin incidentes?
-        if "no-incidents" in (day.get("class") or []):
-            msg = day.get_text(" ", strip=True)
-            m = NO_INCIDENTS_TODAY_RE.search(msg)
-            text = m.group(0) if m else "No incidents reported today."
-            out.append({"date": date_str, "count": 0, "incidents": [f"- {text}"]})
-            continue
+def parse_incidents_today(soup: BeautifulSoup):
+    """
+    Devuelve dict:
+      { "date": "Aug 17, 2025", "count": N, "items": [ "• Resolved — Title (Aug 17, 02:40 PDT) [POPs: LHR, FRA]" ... ] }
+    Si no hay bloque de hoy pero hay "No incidents reported today." global, lo reporta.
+    """
+    day, date_str = find_today_day_block(soup)
+    if not day:
+        # Fallback por texto global
+        full = collapse_ws(soup.get_text(" ", strip=True))
+        if NO_INCIDENTS_TODAY_RE.search(full):
+            return {"date": list(today_header_strings())[0], "count": 0, "items": ["- No incidents reported today."]}
+        return {"date": list(today_header_strings())[0], "count": 0, "items": ["- No incidents section found."]}
 
-        inc_lines = []
-        for inc in day.select(".incident-container, .unresolved-incident"):
-            title_el = inc.select_one(".incident-title a, .incident-title")
-            title = collapse_ws(title_el.get_text(" ", strip=True)) if title_el else "Incident"
-            # Última actualización (suele ser la primera card en la lista de updates)
-            updates = inc.select(".updates-container .update, .incident-update")
-            latest = updates[0] if updates else None
-            status_word, time_text = "", ""
-            if latest:
-                st_el = latest.select_one("strong, .update-status, .update-title")
-                tm_el = latest.select_one("small, time, .update-time")
-                status_word = collapse_ws(st_el.get_text(" ", strip=True)) if st_el else ""
-                time_text = collapse_ws(tm_el.get_text(" ", strip=True)) if tm_el else ""
+    # ¿día sin incidentes?
+    if "no-incidents" in (day.get("class") or []):
+        msg = day.get_text(" ", strip=True)
+        m = NO_INCIDENTS_TODAY_RE.search(msg)
+        text = m.group(0) if m else "No incidents reported today."
+        return {"date": date_str, "count": 0, "items": [f"- {text}"]}
 
-            # POPs afectados (heurística sobre el bloque del incidente)
-            raw_inc_text = collapse_ws(inc.get_text(" ", strip=True))
-            pops = extract_pops(raw_inc_text)
-            pop_suffix = f" [POPs: {', '.join(pops)}]" if pops else ""
+    items = []
+    for inc in day.select(".incident-container, .unresolved-incident"):
+        title_el = inc.select_one(".incident-title a, .incident-title")
+        title = collapse_ws(title_el.get_text(" ", strip=True)) if title_el else "Incident"
+        # Última actualización (primera en la lista)
+        updates = inc.select(".updates-container .update, .incident-update")
+        latest = updates[0] if updates else None
+        status_word, time_text = "", ""
+        if latest:
+            st_el = latest.select_one("strong, .update-status, .update-title")
+            tm_el = latest.select_one("small, time, .update-time")
+            status_word = collapse_ws(st_el.get_text(" ", strip=True)) if st_el else ""
+            time_text = collapse_ws(tm_el.get_text(" ", strip=True)) if tm_el else ""
 
-            if status_word and time_text:
-                inc_lines.append(f"• {status_word} — {title} ({time_text}){pop_suffix}")
-            elif status_word:
-                inc_lines.append(f"• {status_word} — {title}{pop_suffix}")
-            else:
-                inc_lines.append(f"• {title}{pop_suffix}")
+        # POPs afectados -> primero desde el incidente, si no desde la última actualización
+        pops = extract_pops_from_text(collapse_ws(inc.get_text(" ", strip=True)))
+        if not pops and latest:
+            pops = extract_pops_from_text(collapse_ws(latest.get_text(" ", strip=True)))
+        pop_suffix = f" [POPs: {', '.join(pops)}]" if pops else ""
 
-        out.append({"date": date_str, "count": len(inc_lines), "incidents": inc_lines or ["- (No details)"]})
+        if status_word and time_text:
+            items.append(f"• {status_word} — {title} ({time_text}){pop_suffix}")
+        elif status_word:
+            items.append(f"• {status_word} — {title}{pop_suffix}")
+        else:
+            items.append(f"• {title}{pop_suffix}")
 
-    return out
+    return {"date": date_str, "count": len(items), "items": items or ["- (No details)"]}
 
 # ---------- Formato mensaje ----------
 
-def format_message(components, days):
+def format_message(components, today_inc):
     lines = [
         "Imperva - Status",
         now_utc_str(),
@@ -207,21 +260,18 @@ def format_message(components, days):
     # Component status (solo no-operational)
     lines.append("Component status")
     if components:
-        for name, st in components:
-            lines.append(f"- {name}: {st}")
+        for it in components:
+            suffix = f" [POPs: {', '.join(it['pops'])}]" if it.get("pops") else ""
+            lines.append(f"- {it['name']}: {it['status']}{suffix}")
     else:
         lines.append("- All components Operational")
 
-    # Incidents by date
+    # Incidents today (solo hoy)
     lines.append("")
-    lines.append("Incidents by date")
-    if not days:
-        lines.append("- No incidents section found.")
-    else:
-        for d in days:
-            lines.append(f"{d['date']} — {d['count']} incident(s)")
-            for line in d["incidents"]:
-                lines.append(line)
+    lines.append("Incidents today")
+    lines.append(f"{today_inc['date']} — {today_inc['count']} incident(s)")
+    for line in today_inc["items"]:
+        lines.append(line)
 
     return "\n".join(lines)
 
@@ -244,9 +294,9 @@ def run():
 
         soup = BeautifulSoup(html, "lxml")
         comps = parse_components(soup)
-        days = parse_incidents_by_date(soup, DAY_BLOCK_LIMIT)
+        today_inc = parse_incidents_today(soup)
 
-        msg = format_message(comps, days)
+        msg = format_message(comps, today_inc)
         print("\n===== IMPERVA =====")
         print(msg)
         print("===================\n")
