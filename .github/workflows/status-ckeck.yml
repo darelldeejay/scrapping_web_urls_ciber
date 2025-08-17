@@ -18,7 +18,7 @@ jobs:
       TELEGRAM_BOT_TOKEN: ${{ secrets.TELEGRAM_BOT_TOKEN }}
       TELEGRAM_USER_ID:   ${{ secrets.TELEGRAM_USER_ID }}
       TEAMS_WEBHOOK_URL:  ${{ secrets.TEAMS_WEBHOOK_URL }}
-      # SAVE_HTML: "1"  # opcional para depurar
+      SAVE_HTML: "1"  # <-- activa guardado de HTML para depurar
 
     steps:
       - name: Checkout repo
@@ -39,3 +39,14 @@ jobs:
 
       - name: Run ${{ matrix.vendor }}
         run: python run_vendor.py --vendor ${{ matrix.vendor }}
+
+      - name: Upload page HTML (${{ matrix.vendor }})
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: html-${{ matrix.vendor }}
+          path: |
+            *page_source.html
+            **/*page_source.html
+          if-no-files-found: warn
+          retention-days: 7
