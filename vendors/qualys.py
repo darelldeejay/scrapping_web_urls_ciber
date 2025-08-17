@@ -6,7 +6,6 @@ import traceback
 from datetime import datetime, timezone, timedelta
 
 from bs4 import BeautifulSoup
-from dateutil import parser as dateparser
 from selenium.webdriver.common.by import By
 from selenium.webdriver.support.ui import WebDriverWait
 from selenium.webdriver.support import expected_conditions as EC
@@ -18,19 +17,22 @@ from common.format import header
 URL = "https://status.qualys.com/history?filter=8f7fjwhmd4n0"
 SAVE_HTML = os.getenv("SAVE_HTML", "0") == "1"
 
-# Meses abreviados + meses completos (encabezado "June 2025")
+# Meses abreviados + meses completos (p.ej. "June 2025")
 MONTHS_SHORT = "Jan|Feb|Mar|Apr|May|Jun|Jul|Aug|Sep|Oct|Nov|Dec"
 MONTHS_FULL = "January|February|March|April|May|June|July|August|September|October|November|December"
 
-# Rango horario laxo: permite espacios extra alrededor de comas y guiones/en-dash
+# Rango horario laxo: permite espacios extra, coma opcional, guion o en-dash, y TZ de 2-4 letras
+# Ejemplos que empareja:
+#  "Jun 13, 09:18 - Jun 14, 11:18 PDT"
+#  "Jun 2, 05:19 - 05:44 PDT"
 DATE_RANGE_RE = re.compile(
     rf"\b({MONTHS_SHORT})\s+\d{{1,2}}\s*,\s*\d{{1,2}}:\d{{2}}\s*[-–]\s*(?:({MONTHS_SHORT})\s+\d{{1,2}}\s*,\s*)?\d{{1,2}}:\d{{2}}\s*(UTC|GMT|[A-Z]{{2,4}})\b",
     re.I,
 )
-
-# Encabezado "June 2025"
+# Encabezado de mes: "June 2025"
 MONTH_HEADER_RE = re.compile(rf"\b({MONTHS_FULL})\s+(\d{{4}})\b", re.I)
 
+# Mapa de abreviaturas de zona a desplazamiento en minutos
 TZ_OFFSETS_MIN = {
     "UTC": 0, "GMT": 0,
     "PDT": -7*60, "PST": -8*60,
@@ -39,13 +41,15 @@ TZ_OFFSETS_MIN = {
     "MDT": -6*60, "MST": -7*60,
     "CEST": 120, "CET": 60,
     "BST": 60,
-    # añade abreviaturas si Qualys muestra otras
+    # añade otras si Qualys las usa
 }
 
+# ------------------ Utilidades ------------------
+
 def wait_for_page(driver):
-    # Espera a que haya enlaces y que en el body ya aparezcan patrones de hora (tras el render dinámico)
+    # Espera a que haya enlaces y que en el body aparezca alguna línea de fecha (tras render dinámico)
     WebDriverWait(driver, 20).until(EC.presence_of_element_located((By.CSS_SELECTOR, "a[href]")))
-    for _ in range(20):
+    for _ in range(30):
         body_text = driver.find_element(By.TAG_NAME, "body").text
         if DATE_RANGE_RE.search(_collapse_ws(body_text)):
             return
@@ -61,20 +65,22 @@ def _norm_node_text(node) -> str:
         return ""
 
 def _find_year_context(node) -> int | None:
-    # Busca hacia atrás el encabezado "June 2025" más cercano
+    """Busca hacia atrás el encabezado 'June 2025' más cercano para obtener el año."""
     from bs4.element import NavigableString
+    # Recorre hacia atrás en el flujo
     for prev in node.previous_elements:
-        txt = _collapse_ws(prev if isinstance(prev, NavigableString) else getattr(prev, "get_text", lambda *a,**k: "")(" ", strip=True))
+        txt = _collapse_ws(prev if isinstance(prev, str) else getattr(prev, "get_text", lambda *a,**k: "")(" ", strip=True))
         m = MONTH_HEADER_RE.search(txt or "")
         if m:
             try:
                 return int(m.group(2))
             except Exception:
                 pass
-    # fallback: por si viene dentro del mismo contenedor
+    # Fallback subiendo ancestros
     anc = node
     for _ in range(8):
-        if not anc: break
+        if not anc:
+            break
         txt = _norm_node_text(anc)
         m = MONTH_HEADER_RE.search(txt or "")
         if m:
@@ -86,18 +92,18 @@ def _find_year_context(node) -> int | None:
     return None
 
 def _parse_with_tz_abbrev(s_no_tz: str, tzabbr: str):
-    """Convierte 'Jun 13, 2025 09:18' + 'PDT' a UTC usando mapa de abreviaturas."""
+    """Convierte 'Jun 13, 2025 09:18' con tz 'PDT' a UTC usando mapa de abreviaturas."""
     try:
         dt = datetime.strptime(s_no_tz, "%b %d, %Y %H:%M")
     except Exception:
         return None
-    offset = TZ_OFFSETS_MIN.get(tzabbr.upper())
+    offset = TZ_OFFSETS_MIN.get((tzabbr or "").upper())
     if offset is None:
         return None
     tzinfo = timezone(timedelta(minutes=offset))
     return dt.replace(tzinfo=tzinfo).astimezone(timezone.utc)
 
-def _build_dt_strings(part: str, year: int, tzabbr: str) -> str | None:
+def _build_dt_strings(part: str, year: int) -> str | None:
     """
     Normaliza 'Jun 13 , 09:18' -> 'Jun 13, 2025 09:18' (sin TZ).
     """
@@ -112,16 +118,17 @@ def _build_dt_strings(part: str, year: int, tzabbr: str) -> str | None:
 def _parse_date_range(date_text: str, context_node):
     """
     'Jun 13 , 09:18 - Jun 14 , 11:18 PDT' -> (start_utc, end_utc)
-    Usa año del encabezado más cercano.
+    Usa el año del encabezado más cercano.
     """
     date_text = _collapse_ws(date_text)
     m = DATE_RANGE_RE.search(date_text or "")
     if not m:
         return None, None
     tzabbr = m.group(3)
+    # divide por '-' o '–'
     parts = re.split(r"\s*[-–]\s*", m.group(0))
-    left, right = parts[0], parts[1] if len(parts) > 1 else ""
-
+    left = (parts[0] or "").strip().rstrip(",")
+    right = (parts[1] or "").strip()
     # Si 'right' no tiene mes/día, hereda del 'left'
     if not re.search(rf"({MONTHS_SHORT})\s+\d{{1,2}}", right, flags=re.I):
         md = re.match(rf"({MONTHS_SHORT})\s+\d{{1,2}}", left, flags=re.I)
@@ -129,8 +136,8 @@ def _parse_date_range(date_text: str, context_node):
             right = f"{md.group(0)}, {right}"
 
     year = _find_year_context(context_node) or datetime.utcnow().year
-    left_s  = _build_dt_strings(left, year, tzabbr)
-    right_s = _build_dt_strings(right, year, tzabbr)
+    left_s  = _build_dt_strings(left, year)
+    right_s = _build_dt_strings(right, year)
     sdt = _parse_with_tz_abbrev(left_s, tzabbr)  if left_s  else None
     edt = _parse_with_tz_abbrev(right_s, tzabbr) if right_s else None
     return sdt, edt
@@ -149,9 +156,12 @@ def _status_from_text(text: str) -> str:
         return "Incident"
     return "Update"
 
+# ------------------ Extracción ------------------
+
 def _extract_items(soup: BeautifulSoup):
     items = []
-    # 1) Busca divs cuyo texto NORMALIZADO contenga EXACTAMENTE un rango horario
+
+    # 1) Candidatos: <div> cuyo texto NORMALIZADO contenga EXACTAMENTE un rango horario
     candidates = []
     for div in soup.find_all("div"):
         txt = _norm_node_text(div)
@@ -159,16 +169,30 @@ def _extract_items(soup: BeautifulSoup):
         if len(matches) == 1:
             candidates.append((div, txt, matches[0].group(0)))
 
-    # 2) De esos, nos quedamos con los que NO sean Scheduled y que tengan un <a> antes de la fecha
+    # 2) Filtra por tarjeta (no contenedor de mes), descarta [Scheduled], saca título/url/fechas
     for div, txt, date_str in candidates:
         if _is_scheduled(txt):
             continue
 
-        # Busca anchors candidatos
+        # Heurística: si un ancestro cercano también tiene exactamente 1 rango, es contenedor -> saltar
+        anc = div.parent
+        is_container = False
+        for _ in range(6):
+            if not anc or getattr(anc, "name", None) != "div":
+                break
+            anc_txt = _norm_node_text(anc)
+            if len(list(DATE_RANGE_RE.finditer(anc_txt))) == 1:
+                is_container = True
+                break
+            anc = anc.parent
+        if is_container:
+            continue
+
+        # Título: anchor cuyo texto aparezca ANTES de la fecha y sea el más largo
         anchors = div.find_all("a", href=True)
         best_a = None
         best_len = 0
-        pos_date = txt.find(date_str)
+        pos_date = txt.find(date_str) if date_str in txt else -1
         for a in anchors:
             t = _collapse_ws(a.get_text(" ", strip=True))
             if not t:
@@ -176,24 +200,16 @@ def _extract_items(soup: BeautifulSoup):
             if re.search(r"Subscribe To Updates|Support|Filter Components|Qualys|Login|Log in|Terms|Privacy|Guest", t, re.I):
                 continue
             pos_title = txt.find(t)
-            if pos_title != -1 and pos_title < pos_date and len(t) > best_len:
+            if pos_date != -1 and pos_title != -1 and pos_title < pos_date and len(t) > best_len:
                 best_a = a
                 best_len = len(t)
 
-        # Si no hay anchor utilizable, intenta título por línea previa a la fecha
-        if not best_a and not anchors:
-            pass  # dejamos que el fallback (sin anchor) entre más abajo
-
-        # Construye el item
-        title = None
-        url = None
         if best_a:
             title = _collapse_ws(best_a.get_text(" ", strip=True))
             href = best_a.get("href", "")
             url = href if href.startswith("http") else f"https://status.qualys.com{href}" if href.startswith("/") else href
         else:
-            # línea previa a la fecha, evitando frases de estado y scheduled
-            # (usamos el texto del div dividido por líneas pre-normalizadas)
+            # Fallback: primera línea válida previa a la fecha (evita frases de estado y scheduled)
             raw_lines = [ln.strip() for ln in (div.get_text("\n", strip=True) or "").split("\n")]
             acc = []
             for ln in raw_lines:
@@ -203,18 +219,17 @@ def _extract_items(soup: BeautifulSoup):
                     continue
                 if ln:
                     acc.append(ln)
-            if acc:
-                title = _collapse_ws(acc[0])
+            if not acc:
+                continue
+            title = _collapse_ws(acc[0])
+            url = None
 
-        if not title:
-            continue  # no pudimos titular el card de forma fiable
-
+        # Fechas
         started_at, ended_at = _parse_date_range(date_str, div)
-        status = _status_from_text(txt)
 
         items.append({
             "title": title,
-            "status": status,
+            "status": _status_from_text(txt),
             "url": url,
             "started_at": started_at,
             "ended_at": ended_at,
@@ -228,6 +243,8 @@ def _extract_items(soup: BeautifulSoup):
             i.get("title") or "",
         )
     return sorted(items, key=sort_key, reverse=True)
+
+# ------------------ Formato mensaje ------------------
 
 def format_message(items):
     lines = [header("Qualys"), "\n<b>Histórico (meses visibles en la página)</b>"]
@@ -246,6 +263,8 @@ def format_message(items):
         lines.append(title_line)
         lines.append(f"   Estado: {st} · Inicio: {s_s} · Fin: {e_s}")
     return "\n".join(lines)
+
+# ------------------ Runner ------------------
 
 def run():
     driver = start_driver()
