@@ -73,7 +73,6 @@ def parse_incidents_today(soup: BeautifulSoup):
     day, date_str = find_today_day_block(soup)
     default_date = list(today_header_strings())[0]
     if not day:
-        # Fallback: mirar texto global
         full = collapse_ws(soup.get_text(" ", strip=True))
         if NO_INCIDENTS_TODAY_RE.search(full):
             return {"date": default_date, "count": 0, "items": ["- No incidents reported today."]}
@@ -106,7 +105,7 @@ def parse_incidents_today(soup: BeautifulSoup):
 
     return {"date": date_str, "count": len(items), "items": items or ["- (No details)"]}
 
-# ---------- Message (sin 'Component status') ----------
+# ---------- Message (no date duplication; hide "— 0 incident(s)") ----------
 
 def format_message(system_status_text, today_inc):
     lines = [
@@ -121,10 +120,12 @@ def format_message(system_status_text, today_inc):
     else:
         lines.append("System status: (unknown)")
 
-    # Incidents today
+    # Incidents today: if zero, don't show "— 0 incident(s)"
     lines.append("")
-    lines.append("Incidents today")
-    lines.append(f"{today_inc.get('date', 'Today')} — {today_inc.get('count', 0)} incident(s)")
+    if today_inc.get("count", 0) > 0:
+        lines.append(f"Incidents today — {today_inc['count']} incident(s)")
+    else:
+        lines.append("Incidents today")
     for line in (today_inc.get("items") or ["- No incidents reported today."]):
         lines.append(line)
 
