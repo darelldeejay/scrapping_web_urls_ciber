@@ -6,7 +6,8 @@ REGISTRY = {
     "proofpoint": "vendors.proofpoint",
     "qualys": "vendors.qualys",
     "aruba": "vendors.aruba",
-    "imperva": "vendors.imperva",   # ← NUEVO
+    "imperva": "vendors.imperva",
+    "cyberark": "vendors.cyberark",  # ← NUEVO
 }
 
 def main():
