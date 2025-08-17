@@ -151,10 +151,10 @@ def expandir_past_incidents(driver: webdriver.Chrome) -> None:
 # =========================
 MONTHS = "Jan|Feb|Mar|Apr|May|Jun|Jul|Aug|Sep|Oct|Nov|Dec|Ene|Feb|Mar|Abr|May|Jun|Jul|Ago|Sep|Oct|Nov|Dic"
 
-# Estricto (con año) — lo dejamos por compatibilidad, pero usaremos el 'LOOSE'
+# Estricto (con año) — se mantiene por compatibilidad
 DATE_REGEX_STRICT = rf"({MONTHS})\s+\d{{1,2}},?\s+\d{{4}}(?:\s+\d{{1,2}}:\d{{2}}\s*(AM|PM)?)?\s*(UTC|GMT|[A-Z]{{2,4}})?"
 
-# Flexible (sin exigir año, hora opcional) — se usa por defecto
+# Flexible (sin exigir año, con hora opcional) — se usa por defecto
 DATE_REGEX_LOOSE = rf"({MONTHS})\s+\d{{1,2}}(?:,\s*\d{{4}})?(?:\s*,?\s*\d{{1,2}}:\d{{2}}\s*(?:AM|PM)?(?:\s*(?:UTC|GMT|[A-Z]{{2,4}}))?)?"
 
 STATUS_TOKENS = ["Resolved", "Mitigated", "Monitoring", "Identified", "Investigating", "Degraded", "Update"]
@@ -203,6 +203,20 @@ def nearest_date_after_any(labels, text: str):
         if dt:
             return dt
     return None
+
+
+def latest_status_from_text(text: str):
+    """Devuelve la etiqueta de estado correspondiente al último evento del timeline (lo que aparece primero en el texto)."""
+    low = (text or "").lower()
+    # Ordenado de más reciente a menos reciente típico en el portal
+    candidates = ["update", "mitigated", "monitoring", "identified", "investigating", "degraded", "resolved"]
+    positions = []
+    for tok in candidates:
+        idx = low.find(tok)
+        if idx != -1:
+            positions.append((idx, tok.title()))
+    positions.sort()
+    return positions[0][1] if positions else None
 
 
 def find_nearest_header_date(node):
@@ -335,14 +349,13 @@ def normalize_card(card) -> dict:
     Normaliza una tarjeta de incidente:
     - Título: del <a href="/incidents/..."> cuyo texto contiene "Incident <id>".
     - Fechas: inicio = Investigating/Identified ; fin = Resolved (si existe).
-    - Estado: prioriza 'Resolved'; luego Mitigated/Monitoring/Identified/Investigating/Degraded/Update.
+    - Estado: el ÚLTIMO evento del timeline (lo primero que aparece en el bloque).
     """
-    # 1) Subir al contenedor real si nos dieron un <a>
     container = card
     if getattr(card, "name", None) == "a":
         container = incident_container_for(card)
 
-    # 2) URL y título (preferir enlace principal del incidente)
+    # URL y título (preferir enlace principal del incidente)
     url = None
     incident_link = None
     for a in container.find_all("a", href=True):
@@ -371,14 +384,14 @@ def normalize_card(card) -> dict:
         if not title:
             title = "Netskope Incident"
 
-    # 3) Texto completo del contenedor
+    # Texto completo del contenedor
     text = container.get_text(" ", strip=True) if hasattr(container, "get_text") else ""
 
-    # 4) FECHAS
+    # FECHAS
     started_at = None
     ended_at = None
 
-    # 4.1 <time> (por si vienen)
+    # <time> tags
     times = container.find_all("time") if hasattr(container, "find_all") else []
     parsed_times = []
     for t in times:
@@ -390,38 +403,32 @@ def normalize_card(card) -> dict:
         started_at = parsed_times[0]
         ended_at = parsed_times[-1]
 
-    # 4.2 Regex libre (acepta sin año)
+    # Regex (acepta sin año)
     all_dates = [parse_datetime_any(m.group(0)) for m in re.finditer(DATE_REGEX_LOOSE, text or "", flags=re.I)]
     all_dates = [d for d in all_dates if d]
 
-    # Inicio = tras 'Investigating' o 'Identified' ; si no, la más antigua
+    # Inicio = tras 'Investigating'/'Identified' ; si no, más antigua
     start_from_label = nearest_date_after_any(["Investigating", "Identified"], text)
     if start_from_label:
         started_at = start_from_label
     elif not started_at and all_dates:
         started_at = min(all_dates)
 
-    # Fin = tras 'Resolved' ; si no hay, la más reciente como último update
+    # Fin = tras 'Resolved' ; si no, más reciente como último update
     end_from_resolved = nearest_date_after("Resolved", text)
     if end_from_resolved:
         ended_at = end_from_resolved
     elif not ended_at and all_dates:
         ended_at = max(all_dates)
 
-    # Si seguimos sin inicio, usa el encabezado h5/h6 cercano (día de la tarjeta)
+    # Si seguimos sin inicio, usa el encabezado de fecha cercano
     if not started_at:
         started_at = find_nearest_header_date(container)
 
-    # 5) ESTADO (prioridad)
-    lower_text = (text or "").lower()
-    if "resolved" in lower_text:
-        status = "Resolved"
-    else:
-        status = next(
-            (tok for tok in ["Mitigated", "Monitoring", "Identified", "Investigating", "Degraded", "Update"]
-             if tok.lower() in lower_text),
-            "Update"
-        )
+    # ESTADO: último evento del timeline (lo que aparece primero en el bloque)
+    status = latest_status_from_text(text)
+    if not status:
+        status = "Update"
 
     return {
         "title": title,
@@ -497,12 +504,6 @@ def analizar_netskope(driver: webdriver.Chrome) -> tuple[list[dict], list[dict]]
         if (i.get("url") not in past_urls) and ((i.get("title") or "").strip() not in past_titles)
     ]
 
-    # En 'pasados', si no se leyó estado claro, márcalo 'Resolved'
-    for i in pasados:
-        st = (i.get("status") or "").lower()
-        if st not in ("resolved", "mitigated", "monitoring", "identified", "investigating", "degraded", "update"):
-            i["status"] = "Resolved"
-
     # Filtrar 'pasados' a 15 días
     now = datetime.utcnow().replace(tzinfo=timezone.utc)
     cutoff = now - timedelta(days=LOOKBACK_DAYS)
@@ -515,7 +516,7 @@ def analizar_netskope(driver: webdriver.Chrome) -> tuple[list[dict], list[dict]]
 
     pasados_15 = [i for i in pasados if in_lookback(i)]
 
-    # En activos, descartar cualquier 'Resolved' (por si el portal lo dejara arriba transitoriamente)
+    # En activos, descartar cualquier 'Resolved'
     activos = [i for i in activos if (i.get("status") or "").lower() != "resolved"]
 
     return activos, pasados_15
