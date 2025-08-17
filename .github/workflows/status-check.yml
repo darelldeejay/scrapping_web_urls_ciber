@@ -25,7 +25,6 @@ jobs:
         with:
           python-version: '3.10'
 
-      # Instala Google Chrome estable y exporta CHROME_PATH
       - name: Install Google Chrome
         uses: browser-actions/setup-chrome@v1
 
