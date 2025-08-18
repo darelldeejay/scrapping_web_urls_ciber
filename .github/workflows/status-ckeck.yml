@@ -18,7 +18,7 @@ jobs:
       TELEGRAM_BOT_TOKEN: ${{ secrets.TELEGRAM_BOT_TOKEN }}
       TELEGRAM_USER_ID:   ${{ secrets.TELEGRAM_USER_ID }}
       TEAMS_WEBHOOK_URL:  ${{ secrets.TEAMS_WEBHOOK_URL }}
-      SAVE_HTML: "1"  # <-- activa guardado de HTML para depurar
+      SAVE_HTML: "0"  # <-- activa guardado de HTML para depurar
 
     steps:
       - name: Checkout repo
