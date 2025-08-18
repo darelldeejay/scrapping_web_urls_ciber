@@ -160,16 +160,14 @@ def format_message(groups, today_inc):
             status = g.get("status") or "Unknown"
             lines.append(f"{g['name']} {status}")
 
-    # Incidents today en una línea
+    # Incidents today (SIEMPRE con encabezado)
     lines.append("")
+    lines.append("Incidents today")
     if today_inc.get("count", 0) > 0:
-        # Si hay incidentes, muestra el último estado en líneas separadas pero sin título extra
-        for it in today_inc["items"]:
-            lines.append(it)
+        lines.extend(today_inc["items"])
     else:
-        # Una sola línea con el literal
         msg = (today_inc.get("items") or ["No incidents reported today."])[0]
-        lines.append(f"Incidents today: {msg}")
+        lines.append(msg)
 
     return "\n".join(lines)
 
