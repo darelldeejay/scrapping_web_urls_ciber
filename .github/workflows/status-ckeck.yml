@@ -3,7 +3,10 @@ name: Web Status Monitor (multi)
 on:
   workflow_dispatch:
   schedule:
-    - cron: '0 * * * *'  # cada hora
+    # CEST (UTC+2) ≈ de marzo a octubre
+    - cron: '30 6 * * *'  # 06:30 UTC = 08:30 CEST (Europa/Madrid en verano)
+    # CET (UTC+1) ≈ de octubre a marzo
+    - cron: '30 7 * * *'  # 07:30 UTC = 08:30 CET (Europa/Madrid en invierno)
 
 jobs:
   monitor:
