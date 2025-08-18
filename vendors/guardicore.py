@@ -17,7 +17,6 @@ from common.notify import send_telegram, send_teams
 URL = "https://www.akamaistatus.com/"
 SAVE_HTML = os.getenv("SAVE_HTML", "0") == "1"
 
-# Patrones de estado
 DEGRADED_RE = re.compile(r"\bDegraded\b|\bDegraded Performance\b", re.I)
 OPERATIONAL_RE = re.compile(r"\bOperational\b", re.I)
 NO_INCIDENTS_TODAY_RE = re.compile(r"No incidents reported today", re.I)
@@ -45,27 +44,13 @@ def wait_for_page(driver):
             return
         time.sleep(0.3)
 
-# ---------- Componentes con la misma estructura visual de la página ----------
+# -------- Parseo de grupos/children en el mismo orden visual --------
 
 def parse_component_groups(soup: BeautifulSoup):
-    """
-    Devuelve una lista de grupos en el mismo orden visual:
-      [
-        { "name": "Content Delivery", "status": "Operational", "children": [] },
-        { "name": "Customer Service", "status": "Degraded", "children": [
-            {"name": "Akamai Control Center", "status": "Degraded"},
-            {"name": "Case Ticketing", "status": "Operational"}, ...
-        ]},
-        ...
-      ]
-    NOTA: aunque un grupo tenga 'status' en el DOM, en el render final NO mostraremos
-    estado al título si tiene hijos — igual que en tu ejemplo — y listaremos los hijos.
-    """
     groups = []
     for g in soup.select(".component-container.is-group"):
         gname_el = g.select_one(".name")
         gname = collapse_ws(gname_el.get_text(" ", strip=True)) if gname_el else "Group"
-
         gstatus_el = g.select_one(".component-status")
         gstatus = collapse_ws(gstatus_el.get_text(" ", strip=True)) if gstatus_el else ""
 
@@ -77,7 +62,6 @@ def parse_component_groups(soup: BeautifulSoup):
             cstatus = collapse_ws(s_el.get_text(" ", strip=True)) if s_el else ""
             if not cname:
                 continue
-            # Evita el hijo fantasma que repite el nombre del grupo
             if cname.lower() == gname.lower():
                 continue
             children.append({"name": cname, "status": cstatus})
@@ -85,7 +69,7 @@ def parse_component_groups(soup: BeautifulSoup):
         groups.append({"name": gname, "status": gstatus, "children": children})
     return groups
 
-# ---------- Incidentes de HOY en "Past Incidents" ----------
+# -------- Past Incidents: solo HOY --------
 
 def today_header_strings():
     now = datetime.utcnow()
@@ -116,14 +100,14 @@ def parse_incidents_today(soup: BeautifulSoup):
     if not day:
         full = collapse_ws(soup.get_text(" ", strip=True))
         if NO_INCIDENTS_TODAY_RE.search(full):
-            return {"date": default_date, "count": 0, "items": ["- No incidents reported today."]}
-        return {"date": default_date, "count": 0, "items": ["- No incidents section found."]}
+            return {"date": default_date, "count": 0, "items": ["No incidents reported today."]}
+        return {"date": default_date, "count": 0, "items": ["No incidents section found."]}
 
     if "no-incidents" in (day.get("class") or []):
         msg = day.get_text(" ", strip=True)
         m = NO_INCIDENTS_TODAY_RE.search(msg)
         text = m.group(0) if m else "No incidents reported today."
-        return {"date": date_str, "count": 0, "items": [f"- {text}"]}
+        return {"date": date_str, "count": 0, "items": [text]}
 
     lines = []
     for inc in day.select(".incident-container, .unresolved-incident, .incident"):
@@ -138,15 +122,15 @@ def parse_incidents_today(soup: BeautifulSoup):
             status_word = collapse_ws(st_el.get_text(" ", strip=True)) if st_el else ""
             time_text = collapse_ws(tm_el.get_text(" ", strip=True)) if tm_el else ""
         if status_word and time_text:
-            lines.append(f"• {status_word} — {title} ({time_text})")
+            lines.append(f"{status_word} — {title} ({time_text})")
         elif status_word:
-            lines.append(f"• {status_word} — {title}")
+            lines.append(f"{status_word} — {title}")
         else:
-            lines.append(f"• {title}")
+            lines.append(title)
 
-    return {"date": date_str, "count": len(lines), "items": lines or ["- (No details)"]}
+    return {"date": date_str, "count": len(lines), "items": lines or ["(No details)"]}
 
-# ---------- Formato EXACTO al estilo de tu captura ----------
+# -------- Formato compacto como el ejemplo --------
 
 def format_message(groups, today_inc):
     lines = [
@@ -155,37 +139,41 @@ def format_message(groups, today_inc):
         ""
     ]
 
-    lines.append("Component status")
-
+    # Component status (compacto)
     for g in groups:
-        # Si el grupo tiene hijos, NO mostramos estado en el título del grupo;
-        # listamos los hijos tal cual (como en tu ejemplo).
-        if g.get("children"):
-            lines.append(f"- {g['name']}")
-            for ch in g["children"]:
-                lines.append(f"  • {ch['name']}: {ch['status'] or 'Unknown'}")
+        children = g.get("children") or []
+        if children:
+            # ¿Algún hijo NO está Operational?
+            any_non_oper = any(not OPERATIONAL_RE.search((c.get("status") or "")) for c in children)
+            if any_non_oper:
+                # Muestra el título del grupo y luego los hijos con su estado
+                lines.append(f"{g['name']}")
+                for c in children:
+                    cname = c["name"]
+                    cstatus = c.get("status") or "Unknown"
+                    lines.append(f"{cname} {cstatus}")
+            else:
+                # Todos los hijos Operational → una sola línea
+                lines.append(f"{g['name']} Operational")
         else:
-            # Grupo sin hijos: mostramos "Nombre: Estado" en una línea
+            # Grupo sin hijos
             status = g.get("status") or "Unknown"
-            lines.append(f"- {g['name']}: {status}")
+            lines.append(f"{g['name']} {status}")
 
-    # Incidents
+    # Incidents today en una línea
     lines.append("")
-    lines.append("Incidents today")
     if today_inc.get("count", 0) > 0:
-        for line in today_inc["items"]:
-            lines.append(line)
+        # Si hay incidentes, muestra el último estado en líneas separadas pero sin título extra
+        for it in today_inc["items"]:
+            lines.append(it)
     else:
-        items = today_inc.get("items") or []
-        if items:
-            for it in items:
-                lines.append(it)
-        else:
-            lines.append("- No incidents reported today.")
+        # Una sola línea con el literal
+        msg = (today_inc.get("items") or ["No incidents reported today."])[0]
+        lines.append(f"Incidents today: {msg}")
 
     return "\n".join(lines)
 
-# ---------- Runner ----------
+# -------- Runner --------
 
 def run():
     driver = start_driver()
