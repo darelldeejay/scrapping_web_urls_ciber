@@ -5,18 +5,16 @@ import os
 import json
 import argparse
 from datetime import datetime, timezone
-from typing import Dict, Optional, List
+from typing import Dict, Optional, List, Tuple
 
 import requests
 from zoneinfo import ZoneInfo
+import re
 
 def is_truthy_env(name: str) -> bool:
     return os.getenv(name, "").strip().lower() in ("1", "true", "yes", "y", "on")
 
 # ---------------- Template helpers ----------------
-
-import re
-from typing import Tuple
 
 SUBJECT_RE = re.compile(r"^\s*Asunto\s*:\s*(.+)\s*$", re.IGNORECASE)
 TITLE_RE = re.compile(r"<title>(.*?)</title>", re.IGNORECASE | re.DOTALL)
@@ -51,6 +49,12 @@ def render_placeholders(template: str, data: Dict[str, str]) -> str:
         key = m.group(1)
         return str(data.get(key, m.group(0)))
     return PLACEHOLDER_RE.sub(_rep, template)
+
+def render_subject_candidate(s: Optional[str], data: Dict[str, str]) -> Optional[str]:
+    """Renderiza placeholders en el subject si existe."""
+    if not s:
+        return None
+    return render_placeholders(s, data)
 
 def wrap_codeblock(lang: str, content: str) -> str:
     safe = content.replace("```", "``\u200b`")
@@ -87,7 +91,7 @@ def compute_saludo_and_line(data: Dict[str, str]) -> tuple[str, str]:
     try:
         now_local = datetime.now(ZoneInfo(tzname))
     except Exception:
-        now_local = datetime.now()  # fallback sin TZ explícida
+        now_local = datetime.now()
     h = now_local.hour
     if 6 <= h < 12:
         saludo = "Buenos días"
@@ -127,6 +131,10 @@ def inject_defaults(data: Dict[str, str]) -> Dict[str, str]:
         "IMPACTO_CLIENTE_SI_NO": data.get("IMPACTO_CLIENTE_SI_NO", ""),
         "ACCION_SUGERIDA": data.get("ACCION_SUGERIDA", ""),
         "FECHA_SIGUIENTE_REPORTE": data.get("FECHA_SIGUIENTE_REPORTE", ""),
+        "DETALLES_POR_VENDOR_TEXTO": data.get("DETALLES_POR_VENDOR_TEXTO", ""),
+        "SALUDO": data.get("SALUDO", ""),
+        "SALUDO_LINEA": data.get("SALUDO_LINEA", ""),
+        "SUBJECT": data.get("SUBJECT", ""),
     }
     merged = {**defaults, **data}
     # Saludo dinámico
@@ -162,8 +170,10 @@ def send_teams(markdown: str, subject: Optional[str], dry_run: bool) -> None:
         return
     webhook = env_or_raise("TEAMS_WEBHOOK_URL")
     title = subject or "DORA Daily Digest"
-    card = {"@type": "MessageCard","@context": "https://schema.org/extensions",
-            "summary": title,"themeColor": "2B579A","title": title,"text": markdown}
+    card = {
+        "@type": "MessageCard","@context": "https://schema.org/extensions",
+        "summary": title,"themeColor": "2B579A","title": title,"text": markdown
+    }
     r = requests.post(webhook, json=card, timeout=30)
     if r.status_code >= 300:
         msg = r.text
@@ -179,7 +189,7 @@ def write_preview(preview_dir: str, subject: str, html_block: str, text_body: st
         f.write(subject)
     with open(os.path.join(preview_dir, "html_block.md"), "w", encoding="utf-8") as f:
         f.write(html_block)
-    # ⬇️ SIEMPRE escribimos el texto (aunque luego el envío real no lo use)
+    # escribe siempre el texto para revisar el cuerpo plano
     with open(os.path.join(preview_dir, "text_body.txt"), "w", encoding="utf-8") as f:
         f.write(text_body)
 
@@ -196,12 +206,20 @@ def main():
     args = ap.parse_args()
 
     data = inject_defaults(load_data(args.data))
-    text_subject, text_body_tpl = load_text_template(args.text_template)
-    html_subject, html_tpl = load_html_template(args.html_template)
+    text_subject_tpl, text_body_tpl = load_text_template(args.text_template)
+    html_subject_tpl, html_tpl = load_html_template(args.html_template)
 
+    # Render de cuerpos
     text_body = render_placeholders(text_body_tpl, data)
     html_body = render_placeholders(html_tpl, data)
-    subject = data.get("SUBJECT") or text_subject or html_subject or "DORA Daily Digest"
+
+    # Render del SUBJECT (ahora sí se procesan placeholders)
+    # Prioridad: SUBJECT override -> Asunto: del TXT -> <title> del HTML -> fallback
+    subject_override = render_subject_candidate(data.get("SUBJECT"), data)
+    text_subject = render_subject_candidate(text_subject_tpl, data)
+    html_subject = render_subject_candidate(html_subject_tpl, data)
+    subject = subject_override or text_subject or html_subject or "DORA Daily Digest"
+
     html_block = wrap_codeblock("html", html_body)
 
     # DRY-RUN si preview_out o env NOTIFY_DRY_RUN
@@ -217,7 +235,7 @@ def main():
     # Previsualización (no envío)
     if dry_run:
         preview_dir = args.preview_out or ".github/out/preview"
-        write_preview(preview_dir, subject, html_block, f"{subject}\n\n{text_body}")
+        write_preview(preview_dir, subject, html_block, f"{subject}\n\n{text_body}" if args.also_text else text_body)
         print(f"[preview] Escribí previsualización en: {preview_dir}")
         return
 
