@@ -1,25 +1,69 @@
 # common/notify.py
-import os, json, requests
+# -*- coding: utf-8 -*-
+from __future__ import annotations
 
-TELEGRAM_TOKEN = os.getenv("TELEGRAM_BOT_TOKEN")
-TELEGRAM_CHAT_ID = os.getenv("TELEGRAM_USER_ID")
-TEAMS_WEBHOOK_URL = os.getenv("TEAMS_WEBHOOK_URL")
-REQUEST_TIMEOUT = 25
+import os
+import json
+import requests
+from datetime import datetime, timezone
+from typing import Optional
 
-def send_telegram(text: str):
-    if not TELEGRAM_TOKEN or not TELEGRAM_CHAT_ID:
-        print("Telegram no configurado, omito.")
+TELEGRAM_API = "https://api.telegram.org/bot{token}/sendMessage"
+
+def _is_truthy_env(name: str) -> bool:
+    return os.getenv(name, "").strip().lower() in ("1", "true", "yes", "y", "on")
+
+def _capture_write(channel: str, text: str) -> None:
+    """
+    Si DIGEST_CAPTURE=1, escribe capturas en DIGEST_OUT_DIR/<vendor>.capture.txt
+    """
+    if not _is_truthy_env("DIGEST_CAPTURE"):
         return
-    url = f"https://api.telegram.org/bot{TELEGRAM_TOKEN}/sendMessage"
-    payload = {"chat_id": TELEGRAM_CHAT_ID, "text": text, "parse_mode": "HTML", "disable_web_page_preview": True}
-    r = requests.post(url, json=payload, timeout=REQUEST_TIMEOUT)
-    print(f"Telegram: {r.status_code}")
+    out_dir = os.getenv("DIGEST_OUT_DIR", ".github/out/vendors")
+    vendor = os.getenv("CURRENT_VENDOR", "unknown")
+    os.makedirs(out_dir, exist_ok=True)
+    path = os.path.join(out_dir, f"{vendor}.capture.txt")
+    ts = datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ")
+    with open(path, "a", encoding="utf-8") as f:
+        f.write(f"\n[{ts}] <{channel}>\n{text}\n")
 
-def send_teams(text: str):
-    if not TEAMS_WEBHOOK_URL:
-        print("Teams no configurado, omito.")
+def send_telegram(text: str) -> None:
+    _capture_write("telegram", text)
+    if _is_truthy_env("NOTIFY_DRY_RUN"):
         return
-    payload = {"text": text}
-    r = requests.post(TEAMS_WEBHOOK_URL, data=json.dumps(payload),
-                      headers={"Content-Type":"application/json"}, timeout=REQUEST_TIMEOUT)
-    print(f"Teams: {r.status_code}")
+    token = os.getenv("TELEGRAM_BOT_TOKEN")
+    chat_id = os.getenv("TELEGRAM_USER_ID")
+    if not token or not chat_id:
+        # No reventar si falta secret; la captura ya quedó grabada
+        return
+    url = TELEGRAM_API.format(token=token)
+    # Telegram máx ~4096; enviamos tal cual (tus módulos suelen ser compactos)
+    r = requests.post(url, json={"chat_id": chat_id, "text": text}, timeout=30)
+    # No lanzamos excepción dura en notificaciones del flujo principal
+
+def send_teams(markdown: str, title: Optional[str] = None) -> None:
+    _capture_write("teams", f"{('**'+title+'**\\n\\n') if title else ''}{markdown}")
+    if _is_truthy_env("NOTIFY_DRY_RUN"):
+        return
+    webhook = os.getenv("TEAMS_WEBHOOK_URL")
+    if not webhook:
+        return
+    card = {
+        "@type": "MessageCard",
+        "@context": "https://schema.org/extensions",
+        "summary": title or "Status",
+        "themeColor": "2B579A",
+        "title": title or "Status",
+        "text": markdown,
+    }
+    try:
+        requests.post(webhook, json=card, timeout=30)
+    except Exception:
+        pass
+
+class Notifier:
+    """Compatibilidad con vendors que usan una clase."""
+    def telegram(self, text: str) -> None:
+        send_telegram(text)
+    def teams(self, text: str, title: Optional[str] = None) -> None:
+        send_teams(text, title=title)
