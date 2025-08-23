@@ -57,10 +57,15 @@ jobs:
           TELEGRAM_BOT_TOKEN: ${{ secrets.TELEGRAM_BOT_TOKEN }}
           TELEGRAM_USER_ID: ${{ secrets.TELEGRAM_USER_ID }}
           TEAMS_WEBHOOK_URL: ${{ secrets.TEAMS_WEBHOOK_URL }}
+          # === NUEVO: capturar salida de notificaciones para el digest
+          DIGEST_CAPTURE: "1"
+          DIGEST_OUT_DIR: .github/out/vendors
+          # Dry-run solo cuando se ejecuta manualmente y el input 'dry_run' es true
+          NOTIFY_DRY_RUN: ${{ github.event_name == 'workflow_dispatch' && inputs.dry_run || 'false' }}
         run: |
           # Ejecución normal (mantén tu lógica)
           python run_vendor.py --vendor ${{ matrix.vendor }}
-          # Export JSON para el digest (fallback sin collect())
+          # Export JSON para el digest (leerá la captura si existe)
           python run_vendor.py --vendor ${{ matrix.vendor }} --export-json ".github/out/vendors/${{ matrix.vendor }}.json" || true
 
       - name: Upload vendor summary (per-vendor artifact)
