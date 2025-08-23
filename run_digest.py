@@ -179,9 +179,9 @@ def write_preview(preview_dir: str, subject: str, html_block: str, text_body: st
         f.write(subject)
     with open(os.path.join(preview_dir, "html_block.md"), "w", encoding="utf-8") as f:
         f.write(html_block)
-    if text_body.strip():
-        with open(os.path.join(preview_dir, "text_body.txt"), "w", encoding="utf-8") as f:
-            f.write(text_body)
+    # ⬇️ SIEMPRE escribimos el texto (aunque luego el envío real no lo use)
+    with open(os.path.join(preview_dir, "text_body.txt"), "w", encoding="utf-8") as f:
+        f.write(text_body)
 
 # ---------------- Main ----------------
 
@@ -217,7 +217,7 @@ def main():
     # Previsualización (no envío)
     if dry_run:
         preview_dir = args.preview_out or ".github/out/preview"
-        write_preview(preview_dir, subject, html_block, f"{subject}\n\n{text_body}" if args.also_text else "")
+        write_preview(preview_dir, subject, html_block, f"{subject}\n\n{text_body}")
         print(f"[preview] Escribí previsualización en: {preview_dir}")
         return
 
