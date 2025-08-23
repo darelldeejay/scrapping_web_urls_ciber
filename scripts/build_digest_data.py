@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 # scripts/build_digest_data.py
-import os, json, glob, re
+import os, json, glob, re, html
 from datetime import datetime, timezone, timedelta
 from typing import Dict, Any, List, Optional
 
@@ -59,13 +59,29 @@ def build_counts(items: List[Dict[str, Any]]) -> Dict[str, int]:
         "MANTENIMIENTOS_HOY": maint_today,
     }
 
-def build_sources(items: List[Dict[str, Any]]) -> str:
-    links, seen = [], set()
+def build_sources_dual(items: List[Dict[str, Any]]) -> Dict[str, str]:
+    """
+    Devuelve:
+      - LISTA_FUENTES_CON_ENLACES: string con <li>url</li> (para HTML)
+      - FUENTES_TEXTO: string con '- url' por línea (para texto)
+    Deduplica y conserva orden de primera aparición.
+    """
+    links_html, links_txt = [], []
+    seen = set()
     for it in items:
         for s in it.get("sources", []) or []:
-            if s and s not in seen:
-                seen.add(s); links.append(f"<li>{s}</li>")
-    return "\n".join(links)
+            if not s:
+                continue
+            u = str(s).strip()
+            if u in seen:
+                continue
+            seen.add(u)
+            links_html.append(f"<li>{html.escape(u)}</li>")
+            links_txt.append(f"- {u}")
+    return {
+        "LISTA_FUENTES_CON_ENLACES": "\n".join(links_html),
+        "FUENTES_TEXTO": "\n".join(links_txt) if links_txt else "- (sin fuentes detectadas)",
+    }
 
 def build_vendor_text(items: List[Dict[str, Any]]) -> str:
     blocks: List[str] = []
@@ -182,7 +198,6 @@ def main():
 
     data: Dict[str, Any] = {
         "NUM_PROVEEDORES": str(len(items)) if items else "0",
-        "LISTA_FUENTES_CON_ENLACES": build_sources(items),
         "FECHA_SIGUIENTE_REPORTE": compute_next_review_date_str(),
         "DETALLES_POR_VENDOR_TEXTO": build_vendor_text(items),
         "FILAS_INCIDENTES_HOY": "",
@@ -192,6 +207,9 @@ def main():
         "INC_RESUELTOS_HOY": str(counts["INC_RESUELTOS_HOY"]),
         "MANTENIMIENTOS_HOY": str(counts["MANTENIMIENTOS_HOY"]),
     }
+
+    # Fuentes (dual: HTML + texto)
+    data.update(build_sources_dual(items))
 
     # Tablas HTML agregadas
     tables = build_tables_html(items)
@@ -203,8 +221,7 @@ def main():
     # Observación clave automática
     data["OBS_CLAVE"] = build_key_observation(items, counts)
 
-    # Fallbacks de texto (AQUÍ estaba tu NameError si lo pusiste fuera de main)
-    # 1) Genera tablas en texto desde filas HTML si existen
+    # Fallbacks de texto: genera tablas en texto desde filas HTML si existen
     if not data.get("TABLA_INCIDENTES_HOY"):
         txt_today = html_rows_to_text(data.get("FILAS_INCIDENTES_HOY", ""))
         data["TABLA_INCIDENTES_HOY"] = txt_today or "Sin incidentes registrados en este periodo."
