@@ -2,7 +2,7 @@ Asunto: [BANCO PICHINCHA - DORA] Informe diario de incidentes de proveedores ICT
 
 {{SALUDO_LINEA}}
 
-Compartimos el informe diario de incidentes de terceros tecnológicos (ICT) monitorizados, en apoyo a la resiliencia operativa y a los requisitos de DORA.
+Compartimos el informe diario de incidentes de terceros tecnológicos (ICT) monitorizados, en apoyo a la resiliencia operativa y a los requisitos de DORA. Importante mencionar que se especifica que la hora que se representa los datos es UTC porque en muchas páginas de los fabricantes se presenta otros usos horarios, estos son convertidos a la hora donde reside el cliente.
 Ventana de observación: {{VENTANA_UTC}} · Hora de muestreo: {{HORA_MUESTREO_UTC}} (UTC)
 Alcance: {{NUM_PROVEEDORES}} fabricantes · Fuente: Páginas de estado oficiales ofrecidas por los fabricantes.
 
