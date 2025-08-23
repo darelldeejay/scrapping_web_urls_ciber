@@ -101,11 +101,12 @@ jobs:
           path: .github/out/vendors
         continue-on-error: true
 
-      - name: Build digest data JSON
-        run: |
-          python scripts/build_digest_data.py \
-            --vendors-dir .github/out/vendors \
-            --out .github/out/digest_data.json \
+- name: Build digest data JSON
+  run: |
+    :
+    python scripts/build_digest_data.py \
+      --vendors-dir .github/out/vendors \
+      --out .github/out/digest_data.json
             ${ { '': '' } } # placeholder no-op
 
       - name: Compute flags
