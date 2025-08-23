@@ -19,6 +19,16 @@ on:
         required: false
         default: "false"
         type: boolean
+      impacto:
+        description: "Impacto en servicios del cliente (override opcional)"
+        required: false
+        default: ""
+        type: string
+      accion:
+        description: "Acción sugerida (override opcional)"
+        required: false
+        default: ""
+        type: string
   schedule:
     # 08:30 Madrid (CEST/CET)
     - cron: "30 6 * * *"
@@ -57,13 +67,13 @@ jobs:
           TELEGRAM_BOT_TOKEN: ${{ secrets.TELEGRAM_BOT_TOKEN }}
           TELEGRAM_USER_ID: ${{ secrets.TELEGRAM_USER_ID }}
           TEAMS_WEBHOOK_URL: ${{ secrets.TEAMS_WEBHOOK_URL }}
-          # Captura para el digest
+          # Captura para el digest (texto por vendor)
           DIGEST_CAPTURE: "1"
           DIGEST_OUT_DIR: .github/out/vendors
-          # Dry-run solo cuando lanzas manual y pides dry_run:true
+          # Dry-run sólo en lanzamientos manuales con dry_run:true
           NOTIFY_DRY_RUN: ${{ github.event_name == 'workflow_dispatch' && inputs.dry_run || 'false' }}
         run: |
-          # Ejecución normal (mantén tu lógica)
+          # Ejecución normal (mantén tu lógica por vendor)
           python run_vendor.py --vendor ${{ matrix.vendor }}
           # Export JSON para el digest (leerá la captura si existe)
           python run_vendor.py --vendor ${{ matrix.vendor }} --export-json ".github/out/vendors/${{ matrix.vendor }}.json" || true
@@ -98,16 +108,38 @@ jobs:
         uses: actions/download-artifact@v4
         with:
           pattern: vendor-*
-        # merge-multiple: true junto con path fusiona; en v4 es un flag separado:
           merge-multiple: true
           path: .github/out/vendors
         continue-on-error: true
+
+      # NUEVO: escribir overrides de forma segura (escapa comillas/ñ/acentos)
+      - name: Write optional overrides
+        env:
+          IMPACTO: ${{ inputs.impacto }}
+          ACCION: ${{ inputs.accion }}
+        run: |
+          python - <<'PY'
+          import json, os, pathlib
+          d = {}
+          imp = os.getenv("IMPACTO") or ""
+          acc = os.getenv("ACCION") or ""
+          if imp.strip():
+              d["IMPACTO_CLIENTE_SI_NO"] = imp
+          if acc.strip():
+              d["ACCION_SUGERIDA"] = acc
+          out = pathlib.Path(".github/out/overrides.json")
+          out.parent.mkdir(parents=True, exist_ok=True)
+          with out.open("w", encoding="utf-8") as f:
+              json.dump(d, f, ensure_ascii=False, indent=2)
+          print("overrides:", d)
+          PY
 
       - name: Build digest data JSON
         run: |
           python scripts/build_digest_data.py \
             --vendors-dir .github/out/vendors \
-            --out .github/out/digest_data.json
+            --out .github/out/digest_data.json \
+            --overrides .github/out/overrides.json
 
       - name: Compute flags
         id: flags
@@ -125,15 +157,27 @@ jobs:
           echo "NOTIFY_DRY_RUN=$DRY" >> $GITHUB_ENV
           echo "ALSO_TEXT=$ALSO" >> $GITHUB_ENV
 
-      - name: Verify notify secrets (only when sending)
+      # Verifica secrets solo del/los canal/es seleccionados
+      - name: Verify notify secrets (only for selected channels)
         if: env.NOTIFY_DRY_RUN == 'false' && env.CHANNELS != 'none'
         run: |
           missing=0
-          if [ -z "${{ secrets.TELEGRAM_BOT_TOKEN }}" ]; then echo "Missing TELEGRAM_BOT_TOKEN"; missing=1; fi
-          if [ -z "${{ secrets.TELEGRAM_USER_ID }}" ]; then echo "Missing TELEGRAM_USER_ID"; missing=1; fi
-          if [ -z "${{ secrets.TEAMS_WEBHOOK_URL }}" ]; then echo "Missing TEAMS_WEBHOOK_URL"; missing=1; fi
+          case "${{ env.CHANNELS }}" in
+            telegram)
+              if [ -z "${{ secrets.TELEGRAM_BOT_TOKEN }}" ]; then echo "Missing TELEGRAM_BOT_TOKEN"; missing=1; fi
+              if [ -z "${{ secrets.TELEGRAM_USER_ID }}" ]; then echo "Missing TELEGRAM_USER_ID"; missing=1; fi
+              ;;
+            teams)
+              if [ -z "${{ secrets.TEAMS_WEBHOOK_URL }}" ]; then echo "Missing TEAMS_WEBHOOK_URL"; missing=1; fi
+              ;;
+            both)
+              if [ -z "${{ secrets.TELEGRAM_BOT_TOKEN }}" ]; then echo "Missing TELEGRAM_BOT_TOKEN"; missing=1; fi
+              if [ -z "${{ secrets.TELEGRAM_USER_ID }}" ]; then echo "Missing TELEGRAM_USER_ID"; missing=1; fi
+              if [ -z "${{ secrets.TEAMS_WEBHOOK_URL }}" ]; then echo "Missing TEAMS_WEBHOOK_URL"; missing=1; fi
+              ;;
+          esac
           if [ "$missing" -eq 1 ]; then
-            echo "Required secrets are missing; aborting send." >&2
+            echo "Required secrets for selected channel(s) are missing; aborting send." >&2
             exit 1
           fi
 
@@ -159,8 +203,8 @@ jobs:
           echo "[RUN] $CMD"
           eval $CMD
 
+      # Genera siempre el preview del "correo" (texto + HTML) para auditoría
       - name: Always build preview artifact (even if sent)
-        # Siempre generamos el "mail" renderizado para inspección
         run: |
           python run_digest.py \
             --text-template templates/dora_email.txt \
@@ -168,7 +212,7 @@ jobs:
             --data .github/out/digest_data.json \
             --channels none \
             --preview-out .github/out/preview \
-            $([ "${{ env.ALSO_TEXT }}" = "true" ] && echo "--also-text" || true)
+            --also-text
 
       - name: Upload digest preview
         uses: actions/upload-artifact@v4
