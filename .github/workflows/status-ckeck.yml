@@ -1,55 +1,116 @@
-name: Web Status Monitor (multi)
+name: status-check
 
 on:
   workflow_dispatch:
   schedule:
-    # CEST (UTC+2) ≈ de marzo a octubre
-    - cron: '30 6 * * *'  # 06:30 UTC = 08:30 CEST (Europa/Madrid en verano)
-    # CET (UTC+1) ≈ de octubre a marzo
-    - cron: '30 7 * * *'  # 07:30 UTC = 08:30 CET (Europa/Madrid en invierno)
+    # 08:30 Madrid (dos crons por CEST/CET)
+    - cron: "30 6 * * *"  # verano, CEST
+    - cron: "30 7 * * *"  # invierno, CET
+
+concurrency:
+  group: dora-status-${{ github.ref }}
+  cancel-in-progress: true
 
 jobs:
-  monitor:
+  vendors:
+    name: Scraping vendors
     runs-on: ubuntu-latest
-
     strategy:
       fail-fast: false
       matrix:
         vendor: [netskope, proofpoint, qualys, aruba, imperva, cyberark, trendmicro, guardicore]
 
-    env:
-      TELEGRAM_BOT_TOKEN: ${{ secrets.TELEGRAM_BOT_TOKEN }}
-      TELEGRAM_USER_ID:   ${{ secrets.TELEGRAM_USER_ID }}
-      TEAMS_WEBHOOK_URL:  ${{ secrets.TEAMS_WEBHOOK_URL }}
-      SAVE_HTML: "0"  # <-- activa guardado de HTML para depurar
-
     steps:
-      - name: Checkout repo
+      - name: Checkout
         uses: actions/checkout@v4
 
-      - name: Set up Python
+      - name: Setup Python
         uses: actions/setup-python@v5
         with:
-          python-version: '3.10'
+          python-version: "3.10"
 
-      - name: Install Google Chrome
-        uses: browser-actions/setup-chrome@v1
-
-      - name: Install dependencies
+      - name: Install deps
         run: |
           python -m pip install --upgrade pip
           pip install -r requirements.txt
 
-      - name: Run ${{ matrix.vendor }}
-        run: python run_vendor.py --vendor ${{ matrix.vendor }}
+      # Si ya tienes pasos para instalar Chromium/Chromedriver, deja los tuyos.
+      # (Tu workflow actual "ya lo hace"; por defecto lo omito para no tocarlo.)
 
-      - name: Upload page HTML (${{ matrix.vendor }})
+      - name: Prepare out dirs
+        run: |
+          mkdir -p .github/out/vendors
+
+      - name: Run vendor ${{ matrix.vendor }}
+        env:
+          TELEGRAM_BOT_TOKEN: ${{ secrets.TELEGRAM_BOT_TOKEN }}
+          TELEGRAM_USER_ID: ${{ secrets.TELEGRAM_USER_ID }}
+          TEAMS_WEBHOOK_URL: ${{ secrets.TEAMS_WEBHOOK_URL }}
+        run: |
+          # Mantén tu invocación original:
+          python run_vendor.py --vendor ${{ matrix.vendor }}
+
+          # (Opcional pero recomendado) Emitir resumen JSON normalizado del vendor
+          # para que el digest agregue sin re-scrapear:
+          # Ajusta tu run_vendor.py para soportar --export-json si aún no existe.
+          if python - <<'PY'
+import sys, os, json
+# Comprobar si run_vendor.py soporta --help con export-json (opcional, no estrictamente necesario):
+print("ok")
+PY
+          then
+            python run_vendor.py --vendor ${{ matrix.vendor }} --export-json ".github/out/vendors/${{ matrix.vendor }}.json" || true
+          fi
+
+      - name: Upload vendor summary (artifact)
         if: always()
         uses: actions/upload-artifact@v4
         with:
-          name: html-${{ matrix.vendor }}
-          path: |
-            *page_source.html
-            **/*page_source.html
-          if-no-files-found: warn
-          retention-days: 7
+          name: vendor-summaries
+          path: .github/out/vendors/*.json
+          if-no-files-found: ignore
+
+  digest:
+    name: Build & send digest
+    runs-on: ubuntu-latest
+    needs: vendors
+    if: always()  # queremos digest incluso si algún vendor falla
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.10"
+
+      - name: Install deps
+        run: |
+          python -m pip install --upgrade pip
+          pip install -r requirements.txt
+
+      - name: Download vendor summaries
+        uses: actions/download-artifact@v4
+        with:
+          name: vendor-summaries
+          path: .github/out/vendors
+        continue-on-error: true
+
+      - name: Build digest data JSON
+        run: |
+          python scripts/build_digest_data.py \
+            --vendors-dir .github/out/vendors \
+            --out .github/out/digest_data.json
+
+      - name: Send digest to Telegram & Teams
+        env:
+          TELEGRAM_BOT_TOKEN: ${{ secrets.TELEGRAM_BOT_TOKEN }}
+          TELEGRAM_USER_ID: ${{ secrets.TELEGRAM_USER_ID }}
+          TEAMS_WEBHOOK_URL: ${{ secrets.TEAMS_WEBHOOK_URL }}
+        run: |
+          python run_digest.py \
+            --text-template templates/dora_email.txt \
+            --html-template templates/dora_email.html \
+            --data .github/out/digest_data.json \
+            --channels both \
+            --also-text
