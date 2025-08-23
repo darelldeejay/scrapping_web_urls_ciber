@@ -8,11 +8,7 @@ on:
         required: true
         default: "none"   # para pruebas sin enviar nada
         type: choice
-        options:
-          - none
-          - telegram
-          - teams
-          - both
+        options: [none, telegram, teams, both]
       dry_run:
         description: "Solo previsualización (no envía)"
         required: true
@@ -24,7 +20,7 @@ on:
         default: "false"
         type: boolean
   schedule:
-    # 08:30 Madrid (dos crons CEST/CET)
+    # 08:30 Madrid (CEST/CET)
     - cron: "30 6 * * *"
     - cron: "30 7 * * *"
 
@@ -43,33 +39,38 @@ jobs:
 
     steps:
       - uses: actions/checkout@v4
+
       - uses: actions/setup-python@v5
         with:
           python-version: "3.10"
+
       - name: Install deps
         run: |
           python -m pip install --upgrade pip
           pip install -r requirements.txt
+
       - name: Prepare out dirs
         run: mkdir -p .github/out/vendors
+
       - name: Run ${{ matrix.vendor }}
         env:
           TELEGRAM_BOT_TOKEN: ${{ secrets.TELEGRAM_BOT_TOKEN }}
           TELEGRAM_USER_ID: ${{ secrets.TELEGRAM_USER_ID }}
           TEAMS_WEBHOOK_URL: ${{ secrets.TEAMS_WEBHOOK_URL }}
         run: |
-          # Tu ejecución normal
+          # Ejecución normal (mantén tu lógica)
           python run_vendor.py --vendor ${{ matrix.vendor }}
-
           # Export JSON para el digest (fallback sin collect())
           python run_vendor.py --vendor ${{ matrix.vendor }} --export-json ".github/out/vendors/${{ matrix.vendor }}.json" || true
-      - name: Upload vendor summaries
+
+      - name: Upload vendor summary (per-vendor artifact)
         if: always()
         uses: actions/upload-artifact@v4
         with:
-          name: vendor-summaries
-          path: .github/out/vendors/*.json
+          name: vendor-${{ matrix.vendor }}
+          path: .github/out/vendors/${{ matrix.vendor }}.json
           if-no-files-found: ignore
+          retention-days: 7
 
   digest:
     name: Build & send digest
@@ -78,19 +79,24 @@ jobs:
     if: always()
     steps:
       - uses: actions/checkout@v4
+
       - uses: actions/setup-python@v5
         with:
           python-version: "3.10"
+
       - name: Install deps
         run: |
           python -m pip install --upgrade pip
           pip install -r requirements.txt
-      - name: Download vendor summaries
+
+      - name: Download vendor summaries (merge all)
         uses: actions/download-artifact@v4
         with:
-          name: vendor-summaries
+          pattern: vendor-*
+          merge-multiple: true
           path: .github/out/vendors
         continue-on-error: true
+
       - name: Build digest data JSON
         run: |
           python scripts/build_digest_data.py \
@@ -100,7 +106,6 @@ jobs:
       - name: Compute flags
         id: flags
         run: |
-          # Defaults para schedule (si no hay inputs)
           CHANNELS="${{ inputs.send_channels }}"
           [ -z "$CHANNELS" ] && CHANNELS="both"
           DRY="${{ inputs.dry_run }}"
@@ -111,10 +116,6 @@ jobs:
           echo "CHANNELS=$CHANNELS" >> $GITHUB_ENV
           echo "NOTIFY_DRY_RUN=$DRY" >> $GITHUB_ENV
           echo "ALSO_TEXT=$ALSO" >> $GITHUB_ENV
-
-          echo "channels=$CHANNELS" >> $GITHUB_OUTPUT
-          echo "dry_run=$DRY" >> $GITHUB_OUTPUT
-          echo "also_text=$ALSO" >> $GITHUB_OUTPUT
 
       - name: Send or preview digest
         env:
