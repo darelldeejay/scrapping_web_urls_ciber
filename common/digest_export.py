@@ -1,8 +1,8 @@
 # common/digest_export.py
 # -*- coding: utf-8 -*-
-import os, json, re
+import os, json, re, html
 from datetime import datetime, timezone
-from typing import Any, Dict, List, Optional, Tuple
+from typing import Any, Dict, List, Optional
 
 def now_utc_iso() -> str:
     return datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ")
@@ -59,29 +59,23 @@ def escape_html(s: str) -> str:
 # --------------------------------------------------------------------
 
 HEADER_RE = re.compile(r"^\[\d{4}-\d{2}-\d{2}T.*?Z\]\s*<([a-zA-Z0-9_]+)>\s*$")
+
+# Frases "no incidentes" en EN/ES para evitar filas/contajes falsos
 NO_INCIDENTS_RE = re.compile(
-    r"(no\s+(?:current\s+)?(?:identified\s+)?incidents(?:\s+reported\s+(?:today)?)?"
-    r"|incidents\s+today\s*[—\-:]\s*0"
-    r"|all\s+systems\s+operational)"
-    , re.IGNORECASE
+    r"(?:\bno\s+(?:current\s+)?(?:identified\s+)?incidents(?:\s+reported\s+(?:today)?)?\b"
+    r"|\bincidents\s+today\s*[—\-:]\s*0\b"
+    r"|\ball\s+systems\s+operational\b"
+    r"|\bno\s+hay\s+incidentes(?:\s+activos)?(?:\s+reportados)?\b"
+    r"|\bno\s+se\s+han\s+registrado\s+incidentes\b)",
+    re.IGNORECASE
 )
+
 ACTIVE_TOKENS_RE = re.compile(
     r"\b(investigating|identified|degraded|partial\s+outage|service\s+disruption|outage|major\s+incident)\b",
     re.IGNORECASE
 )
 RESOLVED_RE = re.compile(r"\bresolved\b", re.IGNORECASE)
 MAINT_RE = re.compile(r"\bmaint(en(ance|imiento))?|scheduled\s+maintenance\b", re.IGNORECASE)
-
-def _read_capture(vendor: str) -> Optional[str]:
-    out_dir = os.getenv("DIGEST_OUT_DIR", ".github/out/vendors")
-    path = os.path.join(out_dir, f"{vendor}.capture.txt")
-    if os.path.exists(path):
-        try:
-            with open(path, "r", encoding="utf-8") as f:
-                return f.read()
-        except Exception:
-            return None
-    return None
 
 def _extract_channel_blocks(capture_text: str, prefer: str) -> List[str]:
     """
@@ -128,7 +122,6 @@ def _norm_for_dedupe(s: str) -> str:
     - ignora diferencias menores de mayúsculas/espacios
     """
     if not s: return ""
-    # normaliza cada línea
     lines = []
     for ln in s.splitlines():
         ln = ln.replace("\xa0", " ")  # nbsp
@@ -138,31 +131,21 @@ def _norm_for_dedupe(s: str) -> str:
     return txt.lower()
 
 def _dedupe_list_of_blocks(blocks: List[str]) -> List[str]:
-    """
-    Deduplica bloques completos por contenido normalizado, conservando orden.
-    """
     out: List[str] = []
     seen: set = set()
     for b in blocks or []:
         nb = _norm_for_dedupe(b)
-        if nb in seen:  # duplicado
+        if nb in seen:
             continue
         seen.add(nb)
         out.append(b.strip())
     return out
 
 def _split_sections(txt: str) -> List[str]:
-    """
-    Divide un bloque en secciones por párrafos (2+ saltos de línea).
-    """
     parts = re.split(r"(?:\r?\n){2,}", (txt or "").strip())
-    # limpia extremos
     return [p.strip() for p in parts if p and p.strip()]
 
 def _dedupe_inside_block(txt: str) -> str:
-    """
-    Deduplica secciones repetidas dentro del mismo bloque.
-    """
     secs = _split_sections(txt)
     out: List[str] = []
     seen: set = set()
@@ -174,46 +157,100 @@ def _dedupe_inside_block(txt: str) -> str:
         out.append(s)
     return "\n\n".join(out).strip()
 
+# ---------------- Limpieza HTML → Texto profesional ----------------
+
+BR_RE = re.compile(r"(?i)<br\s*/?>")
+TAG_NL_RE = re.compile(r"(?is)</?(?:p|div|h[1-6])[^>]*>")
+LI_OPEN_RE = re.compile(r"(?is)<li[^>]*>")
+LI_CLOSE_RE = re.compile(r"(?is)</li\s*>")
+A_TAG_RE = re.compile(r'(?is)<a\b[^>]*?href\s*=\s*"(.*?)"[^>]*>(.*?)</a\s*>')
+
+def _a_to_text(m: re.Match) -> str:
+    href = (m.group(1) or "").strip()
+    text = re.sub(r"(?is)<[^>]+>", "", m.group(2) or "").strip()
+    return f"{text} ({href})" if href else text
+
+def _html_to_text_simple(s: str) -> str:
+    if not s:
+        return ""
+    # Sustituye etiquetas que implican salto de línea / viñetas
+    s = BR_RE.sub("\n", s)
+    s = TAG_NL_RE.sub("\n", s)
+    s = LI_OPEN_RE.sub("- ", s)
+    s = LI_CLOSE_RE.sub("\n", s)
+    # Enlaces
+    s = A_TAG_RE.sub(_a_to_text, s)
+    # Quita el resto de tags
+    s = re.sub(r"(?is)<[^>]+>", "", s)
+    # Unescape entidades HTML
+    s = html.unescape(s)
+    # Normaliza espacios y saltos de línea
+    s = s.replace("\r", "")
+    # colapsa espacios en blanco dentro de líneas
+    s = "\n".join(re.sub(r"[ \t]+", " ", ln).rstrip() for ln in s.split("\n"))
+    # elimina múltiples saltos en exceso
+    s = re.sub(r"\n{3,}", "\n\n", s)
+    return s.strip()
+
+def _pretty_vendor_text(vendor: str, txt: str) -> str:
+    """
+    Normalización de estilo:
+    - HTML→texto
+    - también compacta patrones repetitivos (status+componentes+no incidents)
+    - dedupe interno
+    """
+    if not txt:
+        return ""
+    out = _html_to_text_simple(txt)
+
+    # Compacta patrón típico "Component status / All components Operational" + "Incidents today / No incidents"
+    out = re.sub(
+        r"(Component status\s*\n-?\s*All components Operational\s*\n+\s*Incidents today\s*\n-?\s*(?:No incidents|No incidents reported today|No hay incidentes.*))\s*(?:\n+\1)+",
+        r"\1",
+        out,
+        flags=re.IGNORECASE
+    )
+
+    # Titulares simples: "Incidentes últimos 15 días" → "Últimos 15 días (resueltos)"
+    out = re.sub(r"(?i)^incidentes\s+últimos\s+15\s+días\s*$", "Últimos 15 días (resueltos)", out, flags=re.MULTILINE)
+
+    # Dedupe secciones tras limpieza
+    out = _dedupe_inside_block(out)
+
+    return out.strip()
+
 def _prefer_vendor_block(capture_text: str) -> str:
     """
     1) Prefiere Telegram; si no, Teams; si no, texto completo.
     2) Deduplica bloques iguales entre sí.
-    3) Deduplica secciones repetidas dentro del bloque resultante.
+    3) Limpia HTML y deduplica secciones repetidas dentro del bloque resultante.
     """
     tg = _extract_channel_blocks(capture_text, "telegram")
     if tg:
         tg = _dedupe_list_of_blocks(tg)
-        return _dedupe_inside_block("\n\n".join(tg))
+        combined = "\n\n".join(tg)
+        return _pretty_vendor_text("vendor", combined)
 
     tm = _extract_channel_blocks(capture_text, "teams")
     if tm:
         tm = _dedupe_list_of_blocks(tm)
-        return _dedupe_inside_block("\n\n".join(tm))
+        combined = "\n\n".join(tm)
+        return _pretty_vendor_text("vendor", combined)
 
-    return _dedupe_inside_block((capture_text or "").strip())
+    return _pretty_vendor_text("vendor", (capture_text or "").strip())
 
 # --------------------------------------------------------------------
-# Construcción desde captura (con deduplicación previa)
+# Construcción desde captura (con deduplicación/limpieza previa)
 # --------------------------------------------------------------------
 
 def _build_from_capture(vendor: str, capture_text: str) -> Dict[str, Any]:
     data = mk_skeleton(vendor)
     vendor_block = _prefer_vendor_block(capture_text)
 
-    # (opcional extra) compacta patrones típicos repetidos exactos
-    vendor_block = re.sub(
-        r"(Component status\s*\n-?\s*All components Operational\s*\n+\s*Incidents today\s*\n-?\s*No incidents reported today)\s*(?:\n+\1)+",
-        r"\1",
-        vendor_block,
-        flags=re.IGNORECASE
-    )
-
-    # Cálculos sobre líneas ya deduplicadas
+    # Cálculos sobre líneas ya deduplicadas y limpias
     lines = [ln.strip() for ln in vendor_block.splitlines() if ln.strip()]
     active = resolved = maint = 0
     today_rows: List[str] = []
-
-    # Para evitar filas duplicadas, usamos un conjunto por línea normalizada
     row_seen: set = set()
 
     for ln in lines:
@@ -222,7 +259,7 @@ def _build_from_capture(vendor: str, capture_text: str) -> Dict[str, Any]:
         if RESOLVED_RE.search(low): resolved += 1
         if MAINT_RE.search(low): maint += 1
 
-        # Fila HTML “mínima” (evita “no incidents” y duplicados exactos)
+        # Fila HTML mínima (evita "no incidents" y duplicados exactos)
         if NO_INCIDENTS_RE.search(low):
             continue
         norm_line = _norm_for_dedupe(ln)
@@ -235,7 +272,7 @@ def _build_from_capture(vendor: str, capture_text: str) -> Dict[str, Any]:
                 f"<td>-</td><td>-</td><td>-</td><td>-</td><td>-</td><td>-</td></tr>"
             )
 
-    # Si el bloque afirma “no incidents” y no hay tokens de actividad, forzamos activos=0/resueltos=0
+    # Si el bloque indica "no incidents" y no hay tokens de actividad, forzamos activos=0/resueltos=0
     if NO_INCIDENTS_RE.search(vendor_block) and not ACTIVE_TOKENS_RE.search(vendor_block):
         active = 0
         resolved = 0
@@ -245,7 +282,6 @@ def _build_from_capture(vendor: str, capture_text: str) -> Dict[str, Any]:
     data["counts"]["maintenance_today"] = maint
     data["tables"]["today_rows_html"] = "\n".join(today_rows[:200])
     data["text"]["vendor_block"] = vendor_block
-
     return data
 
 # --------------------------------------------------------------------
@@ -255,13 +291,21 @@ def _build_from_capture(vendor: str, capture_text: str) -> Dict[str, Any]:
 def export_with_fallback(mod, driver, vendor_name: str) -> Dict[str, Any]:
     """
     Preferencias:
-      0) Captura de notificaciones -> datos + bloque de texto (deduplicado).
+      0) Captura de notificaciones -> datos + bloque de texto (deduplicado y limpio).
       1) export_for_digest(driver) -> si lo implementa el vendor.
       2) collect(driver) legacy -> compatibilidad.
       3) Esqueleto mínimo con sources.
     """
-    # 0) Desde captura (con dedupe)
-    cap = _read_capture(vendor_name)
+    # 0) Desde captura (con dedupe + limpieza)
+    out_dir = os.getenv("DIGEST_OUT_DIR", ".github/out/vendors")
+    path = os.path.join(out_dir, f"{vendor_name}.capture.txt")
+    cap = None
+    if os.path.exists(path):
+        try:
+            with open(path, "r", encoding="utf-8") as f:
+                cap = f.read()
+        except Exception:
+            cap = None
     if cap:
         out = _build_from_capture(vendor_name, cap)
         if not out.get("sources"):
@@ -282,14 +326,14 @@ def export_with_fallback(mod, driver, vendor_name: str) -> Dict[str, Any]:
                     raw["sources"] = extract_sources_from_module(mod)
                 if "text" not in raw:
                     raw["text"] = {"vendor_block": ""}
-                # EXTRA: por si este método repite, aplicamos dedupe al vendor_block
+
                 vb = (raw.get("text", {}) or {}).get("vendor_block", "")
                 if vb:
-                    raw["text"]["vendor_block"] = _dedupe_inside_block(vb)
-                # y evitamos filas duplicadas “hoy”
+                    raw["text"]["vendor_block"] = _pretty_vendor_text(vendor_name, vb)
+
                 tbl = (raw.get("tables", {}) or {}).get("today_rows_html", "")
                 if tbl:
-                    raw["tables"]["today_rows_html"] = _dedupe_table_rows(tbl, vendor_name)
+                    raw["tables"]["today_rows_html"] = _dedupe_table_rows(tbl)
                 return raw
         except Exception:
             pass
@@ -303,7 +347,7 @@ def export_with_fallback(mod, driver, vendor_name: str) -> Dict[str, Any]:
                 out = mk_skeleton(vendor_name)
                 incs = (raw.get("incidents_lines") or [])
 
-                # Dedup de lineas dentro de collect (por si vinieran duplicadas)
+                # Dedup de líneas dentro de collect (por si vinieran duplicadas)
                 dedup_incs: List[str] = []
                 seen = set()
                 for ln in incs:
@@ -312,10 +356,13 @@ def export_with_fallback(mod, driver, vendor_name: str) -> Dict[str, Any]:
                     seen.add(n)
                     dedup_incs.append(ln)
 
+                # Limpieza "HTML→texto" por si el collect dejó tags
+                cleaned_incs = [_html_to_text_simple(x) for x in dedup_incs]
+
                 active = resolved = maint = 0
                 rows = []
                 row_seen = set()
-                for ln in dedup_incs:
+                for ln in cleaned_incs:
                     l = (ln or "").lower()
                     if ACTIVE_TOKENS_RE.search(l): active += 1
                     if RESOLVED_RE.search(l): resolved += 1
@@ -328,7 +375,7 @@ def export_with_fallback(mod, driver, vendor_name: str) -> Dict[str, Any]:
                             f"<tr><td>{vendor_name}</td><td>-</td><td>{escape_html(ln)}</td>"
                             f"<td>-</td><td>-</td><td>-</td><td>-</td><td>-</td><td>-</td></tr>"
                         )
-                block_txt = "\n".join(dedup_incs).strip()
+                block_txt = _dedupe_inside_block("\n".join(cleaned_incs).strip())
                 if NO_INCIDENTS_RE.search(block_txt) and not ACTIVE_TOKENS_RE.search(block_txt):
                     active = 0; resolved = 0
                 out["counts"]["active"] = active
@@ -350,21 +397,18 @@ def export_with_fallback(mod, driver, vendor_name: str) -> Dict[str, Any]:
 # Utilidad: dedupe de filas HTML (por si un export_for_digest aporta filas)
 # --------------------------------------------------------------------
 
-def _dedupe_table_rows(html_rows: str, vendor: str) -> str:
+def _dedupe_table_rows(html_rows: str) -> str:
     """
     Elimina filas HTML duplicadas (misma tercera celda tras normalizar).
     """
     if not html_rows:
         return ""
-    # Partimos por cierre de TR y reconstruimos
     parts = re.split(r"(?i)</tr\s*>", html_rows)
     out_parts: List[str] = []
     seen: set = set()
     for p in parts:
         if not p or not p.strip():
             continue
-        # intentamos extraer la tercera celda (contenido principal)
-        # simplista: quitar tags y colapsar espacios
         cell_txt = re.sub(r"(?is)<[^>]+>", " ", p)
         cell_txt = re.sub(r"\s+", " ", cell_txt).strip().lower()
         if cell_txt in seen:
