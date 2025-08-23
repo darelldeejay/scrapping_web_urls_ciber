@@ -101,13 +101,11 @@ jobs:
           path: .github/out/vendors
         continue-on-error: true
 
-- name: Build digest data JSON
-  run: |
-    :
-    python scripts/build_digest_data.py \
-      --vendors-dir .github/out/vendors \
-      --out .github/out/digest_data.json
-            ${ { '': '' } } # placeholder no-op
+      - name: Build digest data JSON
+        run: |
+          python scripts/build_digest_data.py \
+            --vendors-dir .github/out/vendors \
+            --out .github/out/digest_data.json
 
       - name: Compute flags
         id: flags
@@ -125,7 +123,7 @@ jobs:
           echo "NOTIFY_DRY_RUN=$DRY" >> $GITHUB_ENV
           echo "ALSO_TEXT=$ALSO" >> $GITHUB_ENV
 
-          # Si hay overrides, creamos un pequeño JSON para que run_digest lo absorba
+          # Si hay overrides, guardamos JSON para mezclar luego
           if [ -n "$IMPACTO" ] || [ -n "$ACCION" ]; then
             echo "{\"IMPACTO_CLIENTE_SI_NO\":\"$IMPACTO\",\"ACCION_SUGERIDA\":\"$ACCION\"}" > .github/out/overrides.json
             echo "OVERRIDES_PATH=.github/out/overrides.json" >> $GITHUB_ENV
@@ -134,10 +132,10 @@ jobs:
           fi
 
       - name: Merge overrides (optional)
-        if: env.OVERRIDES_PATH != ''
+        if: ${{ env.OVERRIDES_PATH != '' }}
         run: |
           python - << 'PY'
-          import json, sys
+          import json
           base = json.load(open(".github/out/digest_data.json","r",encoding="utf-8"))
           over = json.load(open(".github/out/overrides.json","r",encoding="utf-8"))
           base.update({k:v for k,v in over.items() if v != ""})
@@ -167,7 +165,7 @@ jobs:
           eval $CMD
 
       - name: Upload digest preview
-        if: env.NOTIFY_DRY_RUN == 'true'
+        if: ${{ env.NOTIFY_DRY_RUN == 'true' }}
         uses: actions/upload-artifact@v4
         with:
           name: digest-preview
