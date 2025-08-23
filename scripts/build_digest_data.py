@@ -1,16 +1,13 @@
 #!/usr/bin/env python3
-import os, json, glob, re
+# scripts/build_digest_data.py
+import os, json, glob
 from datetime import datetime, timezone, timedelta
 from typing import Dict, Any, List, Optional
-from zoneinfo import ZoneInfo
 
+# Palabras “críticas” (para recomendar escalar). Ojo: sin 'impact' ni 'partial' genérico.
 KEYWORDS_CRITICAL = (
-    "critical", "major", "sev-1", "sev1", "p1", "security", "ddos", "ransom",
-    "outage", "total", "unavailable"
-)
-KEYWORDS_ACTIVE = (
-    "investigating", "degraded", "partial", "intermittent", "impact", "latency",
-    "performance", "disruption"
+    "critical", "major", "sev-1", "sev1", "p1", "security incident",
+    "security advisory", "outage", "total outage", "unavailable", "ddos", "breach"
 )
 
 def load_vendor_jsons(vendors_dir: str) -> List[Dict[str, Any]]:
@@ -82,39 +79,37 @@ def build_vendor_text(items: List[Dict[str, Any]]) -> str:
 
 def infer_operational_recommendations(items: List[Dict[str, Any]], counts: Dict[str, int]) -> Dict[str, str]:
     """
-    Heurística simple:
-    - Impacto: "Sí" si hay activos>0 y aparecen keywords críticas; "Posible" si activos>0; "No" si 0.
-    - Acción: escalado si crítico; monitorización si solo activo; sin acción si no hay activo.
+    Regla clara:
+      - Si INC_ACTIVOS == 0 → Impacto=No, Acción=Sin acción.
+      - Si INC_ACTIVOS > 0 y hay palabras críticas → Impacto=Sí (potencialmente crítico), Acción=Escalar...
+      - Si INC_ACTIVOS > 0 y no crítico → Impacto=Posible, Acción=Monitorización...
     """
     active = counts.get("INC_ACTIVOS", 0)
+    if active <= 0:
+        return {
+            "IMPACTO_CLIENTE_SI_NO": "No",
+            "ACCION_SUGERIDA": "Sin acción."
+        }
+
     any_critical = False
     for it in items:
-        txt = (safe_get(it, ["text", "vendor_block"], "") or "") + " " + \
-              " ".join((safe_get(it, ["tables", "today_rows_html"], "") or "").split("<"))
+        txt = (safe_get(it, ["text", "vendor_block"], "") or "")
         low = txt.lower()
         if any(k in low for k in KEYWORDS_CRITICAL):
             any_critical = True
             break
-    if active > 0 and any_critical:
+
+    if any_critical:
         return {
             "IMPACTO_CLIENTE_SI_NO": "Sí (potencialmente crítico)",
             "ACCION_SUGERIDA": "Escalar a proveedor/es y comunicación interna; monitorización reforzada hasta resolución."
         }
-    if active > 0:
-        return {
-            "IMPACTO_CLIENTE_SI_NO": "Posible",
-            "ACCION_SUGERIDA": "Monitorización reforzada y verificación de servicios dependientes."
-        }
     return {
-        "IMPACTO_CLIENTE_SI_NO": "No",
-        "ACCION_SUGERIDA": "Sin acción."
+        "IMPACTO_CLIENTE_SI_NO": "Posible",
+        "ACCION_SUGERIDA": "Monitorización reforzada y verificación de servicios dependientes."
     }
 
 def compute_next_review_date_str() -> str:
-    """
-    Próxima revisión = mañana (fecha en UTC). Si prefieres la próxima a las 08:30 Europe/Madrid,
-    puedes calcularla aquí y devolver solo la fecha.
-    """
     return (datetime.now(timezone.utc) + timedelta(days=1)).strftime("%Y-%m-%d")
 
 def load_overrides(path: Optional[str]) -> Dict[str, str]:
@@ -142,7 +137,7 @@ def main():
         "NUM_PROVEEDORES": str(len(items)) if items else "0",
         "OBS_CLAVE": "",
         "LISTA_FUENTES_CON_ENLACES": build_sources(items),
-        "FECHA_SIGUIENTE_REPORTE": compute_next_review_date_str(),  # <-- mañana
+        "FECHA_SIGUIENTE_REPORTE": compute_next_review_date_str(),
         "DETALLES_POR_VENDOR_TEXTO": build_vendor_text(items),
         "FILAS_INCIDENTES_HOY": "",
         "FILAS_INCIDENTES_15D": "",
@@ -151,11 +146,11 @@ def main():
         "INC_RESUELTOS_HOY": str(counts["INC_RESUELTOS_HOY"]),
         "MANTENIMIENTOS_HOY": str(counts["MANTENIMIENTOS_HOY"]),
     }
-    # Tablas HTML agregadas
+
     tables = build_tables_html(items)
     data.update(tables)
 
-    # Heurística automática
+    # Recomendaciones (con la regla de “si no hay activos => No/Sin acción”)
     recs = infer_operational_recommendations(items, counts)
     data.update(recs)
 
