@@ -10,6 +10,7 @@ from typing import Dict, Optional, List, Tuple
 import requests
 from zoneinfo import ZoneInfo
 import re
+import html
 
 def is_truthy_env(name: str) -> bool:
     return os.getenv(name, "").strip().lower() in ("1", "true", "yes", "y", "on")
@@ -39,10 +40,10 @@ def load_text_template(path: str) -> Tuple[Optional[str], str]:
 
 def load_html_template(path: str) -> Tuple[Optional[str], str]:
     with open(path, "r", encoding="utf-8") as f:
-        html = f.read()
-    m = TITLE_RE.search(html)
+        html_txt = f.read()
+    m = TITLE_RE.search(html_txt)
     subject = m.group(1).strip() if m else None
-    return subject, html
+    return subject, html_txt
 
 def render_placeholders(template: str, data: Dict[str, str]) -> str:
     def _rep(m):
@@ -51,7 +52,6 @@ def render_placeholders(template: str, data: Dict[str, str]) -> str:
     return PLACEHOLDER_RE.sub(_rep, template)
 
 def render_subject_candidate(s: Optional[str], data: Dict[str, str]) -> Optional[str]:
-    """Renderiza placeholders en el subject si existe."""
     if not s:
         return None
     return render_placeholders(s, data)
@@ -83,10 +83,6 @@ def load_data(path: Optional[str]) -> Dict[str, str]:
     return {k: ("" if v is None else str(v)) for k, v in data.items()}
 
 def compute_saludo_and_line(data: Dict[str, str]) -> tuple[str, str]:
-    """
-    Devuelve (SALUDO, SALUDO_LINEA) según hora local (por defecto Europe/Madrid).
-    Si 'NOMBRE_CONTACTO' existe y no está vacío, se añade al saludo.
-    """
     tzname = os.getenv("GREETING_TZ", "Europe/Madrid")
     try:
         now_local = datetime.now(ZoneInfo(tzname))
@@ -99,7 +95,6 @@ def compute_saludo_and_line(data: Dict[str, str]) -> tuple[str, str]:
         saludo = "Buenas tardes"
     else:
         saludo = "Buenas noches"
-
     nombre = (data.get("NOMBRE_CONTACTO") or "").strip()
     if nombre:
         saludo_linea = f"{saludo} {nombre},"
@@ -122,6 +117,7 @@ def inject_defaults(data: Dict[str, str]) -> Dict[str, str]:
         "FILAS_INCIDENTES_HOY": data.get("FILAS_INCIDENTES_HOY", ""),
         "FILAS_INCIDENTES_15D": data.get("FILAS_INCIDENTES_15D", ""),
         "LISTA_FUENTES_CON_ENLACES": data.get("LISTA_FUENTES_CON_ENLACES", ""),
+        "FUENTES_TEXTO": data.get("FUENTES_TEXTO", ""),
         "FIRMA_HTML": data.get("FIRMA_HTML", ""),
         "TABLA_INCIDENTES_HOY": data.get("TABLA_INCIDENTES_HOY", ""),
         "TABLA_INCIDENTES_15D": data.get("TABLA_INCIDENTES_15D", ""),
@@ -137,11 +133,39 @@ def inject_defaults(data: Dict[str, str]) -> Dict[str, str]:
         "SUBJECT": data.get("SUBJECT", ""),
     }
     merged = {**defaults, **data}
-    # Saludo dinámico
     saludo, saludo_linea = compute_saludo_and_line(merged)
     merged["SALUDO"] = saludo
     merged["SALUDO_LINEA"] = saludo_linea
     return merged
+
+# ---------------- Normalización para el cuerpo de TEXTO ----------------
+
+LI_RE = re.compile(r"(?is)<li\b[^>]*>(.*?)</li\s*>")
+TAGS_SIMPLE_RE = re.compile(r"(?is)<\/?(?:ul|ol)\b[^>]*>")
+
+def _html_list_to_text_bullets(s: str) -> str:
+    """
+    Convierte cualquier lista HTML <li>…</li> a viñetas '- …' en texto plano.
+    Deja el resto del contenido intacto.
+    """
+    if not s or ("<li" not in s and "</li>" not in s):
+        return s
+
+    def _one_li(m: re.Match) -> str:
+        inner = m.group(1) or ""
+        # quita tags internos y desescapa entidades
+        inner = re.sub(r"(?is)<[^>]+>", "", inner)
+        inner = html.unescape(inner)
+        inner = re.sub(r"[ \t]+", " ", inner).strip()
+        if not inner:
+            inner = "-"
+        return f"- {inner}"
+
+    out = LI_RE.sub(_one_li, s)
+    out = TAGS_SIMPLE_RE.sub("", out)
+    # Normaliza doble saltos si se generaron
+    out = re.sub(r"\n{3,}", "\n\n", out)
+    return out
 
 # ---------------- Senders (honran DRY-RUN) ----------------
 
@@ -189,7 +213,6 @@ def write_preview(preview_dir: str, subject: str, html_block: str, text_body: st
         f.write(subject)
     with open(os.path.join(preview_dir, "html_block.md"), "w", encoding="utf-8") as f:
         f.write(html_block)
-    # escribe siempre el texto para revisar el cuerpo plano
     with open(os.path.join(preview_dir, "text_body.txt"), "w", encoding="utf-8") as f:
         f.write(text_body)
 
@@ -206,6 +229,10 @@ def main():
     args = ap.parse_args()
 
     data = inject_defaults(load_data(args.data))
+    # Si por lo que sea FUENTES_TEXTO viene vacío y tenemos la lista HTML, la convertimos una vez aquí.
+    if not data.get("FUENTES_TEXTO") and data.get("LISTA_FUENTES_CON_ENLACES"):
+        data["FUENTES_TEXTO"] = _html_list_to_text_bullets(data["LISTA_FUENTES_CON_ENLACES"])
+
     text_subject_tpl, text_body_tpl = load_text_template(args.text_template)
     html_subject_tpl, html_tpl = load_html_template(args.html_template)
 
@@ -213,8 +240,11 @@ def main():
     text_body = render_placeholders(text_body_tpl, data)
     html_body = render_placeholders(html_tpl, data)
 
-    # Render del SUBJECT (ahora sí se procesan placeholders)
-    # Prioridad: SUBJECT override -> Asunto: del TXT -> <title> del HTML -> fallback
+    # Arreglo extra: si el cuerpo de texto aún contiene <li>…</li>, lo convertimos a viñetas
+    if "<li" in text_body or "</li>" in text_body:
+        text_body = _html_list_to_text_bullets(text_body)
+
+    # Render del SUBJECT (procesamos placeholders)
     subject_override = render_subject_candidate(data.get("SUBJECT"), data)
     text_subject = render_subject_candidate(text_subject_tpl, data)
     html_subject = render_subject_candidate(html_subject_tpl, data)
