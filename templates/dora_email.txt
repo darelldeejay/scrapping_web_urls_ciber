@@ -14,7 +14,7 @@ Incidentes últimos 15 días (resueltos)
 {{TABLA_INCIDENTES_15D}}
 (si no aparecen filas, no hay registros agregados para este periodo)
 
-Detalle por fabricante:
+Detalles por fabricante:
 
 {{DETALLES_POR_VENDOR_TEXTO}}
 
@@ -23,7 +23,8 @@ Resumen ejecutivo
 - Incidentes activos: {{INC_ACTIVOS}}
 - Incidentes resueltos hoy: {{INC_RESUELTOS_HOY}}
 - Mantenimientos programados hoy: {{MANTENIMIENTOS_HOY}}
-- Observación clave: {{OBS_CLAVE}}
+
+Resumen y observación clave según la información antes brindada: {{OBS_CLAVE}}
 
 Recomendaciones operativas
 - Impacto en servicios del cliente: {{IMPACTO_CLIENTE_SI_NO}}
