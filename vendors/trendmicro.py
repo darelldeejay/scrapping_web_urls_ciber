@@ -256,3 +256,41 @@ def run():
             driver.quit()
         except Exception:
             pass
+def collect(driver):
+    sections = []
+    overall_ok = True
+    from bs4 import BeautifulSoup
+
+    for site in SITES:
+        driver.get(site["url"])
+        wait_for_page(driver)
+        html = driver.page_source
+        records = parse_ssp_records_for_product(html, site["product"])
+        today = summarize_today(records)
+
+        # Construye líneas por consola
+        if today["count"] > 0:
+            lines = [f"[{site['name']}]", f"Incidents today — {today['count']} incident(s)"]
+            lines.extend(today["items"])
+            overall_ok = False
+        else:
+            soup = BeautifulSoup(html, "lxml")
+            no_msg = extract_no_incidents_text(soup)
+            lines = [f"[{site['name']}]", "Incidents today", f"- {no_msg}"]
+        sections.append("\n".join(lines))
+
+    # Para el digest, lo tratamos como un único vendor con bloques
+    component_lines = []  # Trend no expone “componentes”, así que lo dejamos vacío
+    incidents_lines = []
+    for sec in sections:
+        incidents_lines.append(sec)  # cada bloque como párrafo
+
+    if not incidents_lines:
+        incidents_lines = ["No incidents reported today."]
+
+    return {
+        "name": "Trend Micro",
+        "component_lines": component_lines,
+        "incidents_lines": incidents_lines,
+        "overall_ok": overall_ok,
+    }
