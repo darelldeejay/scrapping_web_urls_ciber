@@ -2,10 +2,31 @@ name: status-check
 
 on:
   workflow_dispatch:
+    inputs:
+      send_channels:
+        description: "Dónde enviar"
+        required: true
+        default: "none"   # para pruebas sin enviar nada
+        type: choice
+        options:
+          - none
+          - telegram
+          - teams
+          - both
+      dry_run:
+        description: "Solo previsualización (no envía)"
+        required: true
+        default: "true"
+        type: boolean
+      also_text:
+        description: "Incluir versión de texto en el mensaje"
+        required: false
+        default: "false"
+        type: boolean
   schedule:
-    # 08:30 Madrid (dos crons por CEST/CET)
-    - cron: "30 6 * * *"  # verano, CEST
-    - cron: "30 7 * * *"  # invierno, CET
+    # 08:30 Madrid (dos crons CEST/CET)
+    - cron: "30 6 * * *"
+    - cron: "30 7 * * *"
 
 concurrency:
   group: dora-status-${{ github.ref }}
@@ -21,48 +42,28 @@ jobs:
         vendor: [netskope, proofpoint, qualys, aruba, imperva, cyberark, trendmicro, guardicore]
 
     steps:
-      - name: Checkout
-        uses: actions/checkout@v4
-
-      - name: Setup Python
-        uses: actions/setup-python@v5
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
         with:
           python-version: "3.10"
-
       - name: Install deps
         run: |
           python -m pip install --upgrade pip
           pip install -r requirements.txt
-
-      # Si ya tienes pasos para instalar Chromium/Chromedriver, deja los tuyos.
-      # (Tu workflow actual "ya lo hace"; por defecto lo omito para no tocarlo.)
-
       - name: Prepare out dirs
-        run: |
-          mkdir -p .github/out/vendors
-
-      - name: Run vendor ${{ matrix.vendor }}
+        run: mkdir -p .github/out/vendors
+      - name: Run ${{ matrix.vendor }}
         env:
           TELEGRAM_BOT_TOKEN: ${{ secrets.TELEGRAM_BOT_TOKEN }}
           TELEGRAM_USER_ID: ${{ secrets.TELEGRAM_USER_ID }}
           TEAMS_WEBHOOK_URL: ${{ secrets.TEAMS_WEBHOOK_URL }}
         run: |
-          # Mantén tu invocación original:
+          # Tu ejecución normal
           python run_vendor.py --vendor ${{ matrix.vendor }}
 
-          # (Opcional pero recomendado) Emitir resumen JSON normalizado del vendor
-          # para que el digest agregue sin re-scrapear:
-          # Ajusta tu run_vendor.py para soportar --export-json si aún no existe.
-          if python - <<'PY'
-import sys, os, json
-# Comprobar si run_vendor.py soporta --help con export-json (opcional, no estrictamente necesario):
-print("ok")
-PY
-          then
-            python run_vendor.py --vendor ${{ matrix.vendor }} --export-json ".github/out/vendors/${{ matrix.vendor }}.json" || true
-          fi
-
-      - name: Upload vendor summary (artifact)
+          # Export JSON para el digest (fallback sin collect())
+          python run_vendor.py --vendor ${{ matrix.vendor }} --export-json ".github/out/vendors/${{ matrix.vendor }}.json" || true
+      - name: Upload vendor summaries
         if: always()
         uses: actions/upload-artifact@v4
         with:
@@ -74,43 +75,74 @@ PY
     name: Build & send digest
     runs-on: ubuntu-latest
     needs: vendors
-    if: always()  # queremos digest incluso si algún vendor falla
+    if: always()
     steps:
-      - name: Checkout
-        uses: actions/checkout@v4
-
-      - name: Setup Python
-        uses: actions/setup-python@v5
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
         with:
           python-version: "3.10"
-
       - name: Install deps
         run: |
           python -m pip install --upgrade pip
           pip install -r requirements.txt
-
       - name: Download vendor summaries
         uses: actions/download-artifact@v4
         with:
           name: vendor-summaries
           path: .github/out/vendors
         continue-on-error: true
-
       - name: Build digest data JSON
         run: |
           python scripts/build_digest_data.py \
             --vendors-dir .github/out/vendors \
             --out .github/out/digest_data.json
 
-      - name: Send digest to Telegram & Teams
+      - name: Compute flags
+        id: flags
+        run: |
+          # Defaults para schedule (si no hay inputs)
+          CHANNELS="${{ inputs.send_channels }}"
+          [ -z "$CHANNELS" ] && CHANNELS="both"
+          DRY="${{ inputs.dry_run }}"
+          [ -z "$DRY" ] && DRY="false"
+          ALSO="${{ inputs.also_text }}"
+          [ -z "$ALSO" ] && ALSO="false"
+
+          echo "CHANNELS=$CHANNELS" >> $GITHUB_ENV
+          echo "NOTIFY_DRY_RUN=$DRY" >> $GITHUB_ENV
+          echo "ALSO_TEXT=$ALSO" >> $GITHUB_ENV
+
+          echo "channels=$CHANNELS" >> $GITHUB_OUTPUT
+          echo "dry_run=$DRY" >> $GITHUB_OUTPUT
+          echo "also_text=$ALSO" >> $GITHUB_OUTPUT
+
+      - name: Send or preview digest
         env:
           TELEGRAM_BOT_TOKEN: ${{ secrets.TELEGRAM_BOT_TOKEN }}
           TELEGRAM_USER_ID: ${{ secrets.TELEGRAM_USER_ID }}
           TEAMS_WEBHOOK_URL: ${{ secrets.TEAMS_WEBHOOK_URL }}
+          NOTIFY_DRY_RUN: ${{ env.NOTIFY_DRY_RUN }}
         run: |
-          python run_digest.py \
+          CMD="python run_digest.py \
             --text-template templates/dora_email.txt \
             --html-template templates/dora_email.html \
             --data .github/out/digest_data.json \
-            --channels both \
-            --also-text
+            --channels \"$CHANNELS\""
+          if [ "$ALSO_TEXT" = "true" ]; then
+            CMD="$CMD --also-text"
+          fi
+          if [ "$NOTIFY_DRY_RUN" = "true" ]; then
+            CMD="$CMD --preview-out .github/out/preview"
+          fi
+          echo "[RUN] $CMD"
+          eval $CMD
+
+      - name: Upload digest preview
+        if: env.NOTIFY_DRY_RUN == 'true'
+        uses: actions/upload-artifact@v4
+        with:
+          name: digest-preview
+          path: |
+            .github/out/preview/**
+            .github/out/digest_data.json
+          if-no-files-found: error
