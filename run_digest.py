@@ -153,7 +153,6 @@ def _html_list_to_text_bullets(s: str) -> str:
 
     def _one_li(m: re.Match) -> str:
         inner = m.group(1) or ""
-        # quita tags internos y desescapa entidades
         inner = re.sub(r"(?is)<[^>]+>", "", inner)
         inner = html.unescape(inner)
         inner = re.sub(r"[ \t]+", " ", inner).strip()
@@ -163,7 +162,6 @@ def _html_list_to_text_bullets(s: str) -> str:
 
     out = LI_RE.sub(_one_li, s)
     out = TAGS_SIMPLE_RE.sub("", out)
-    # Normaliza doble saltos si se generaron
     out = re.sub(r"\n{3,}", "\n\n", out)
     return out
 
@@ -207,14 +205,17 @@ def send_teams(markdown: str, subject: Optional[str], dry_run: bool) -> None:
 
 # ---------------- Preview writers ----------------
 
-def write_preview(preview_dir: str, subject: str, html_block: str, text_body: str) -> None:
+def write_preview(preview_dir: str, subject: str, html_block_md: str, text_body: str, html_raw: str) -> None:
     os.makedirs(preview_dir, exist_ok=True)
     with open(os.path.join(preview_dir, "subject.txt"), "w", encoding="utf-8") as f:
         f.write(subject)
     with open(os.path.join(preview_dir, "html_block.md"), "w", encoding="utf-8") as f:
-        f.write(html_block)
+        f.write(html_block_md)
     with open(os.path.join(preview_dir, "text_body.txt"), "w", encoding="utf-8") as f:
         f.write(text_body)
+    # NUEVO: HTML renderizable
+    with open(os.path.join(preview_dir, "email.html"), "w", encoding="utf-8") as f:
+        f.write(html_raw)
 
 # ---------------- Main ----------------
 
@@ -229,7 +230,7 @@ def main():
     args = ap.parse_args()
 
     data = inject_defaults(load_data(args.data))
-    # Si por lo que sea FUENTES_TEXTO viene vacío y tenemos la lista HTML, la convertimos una vez aquí.
+    # Fallback: si falta FUENTES_TEXTO pero hay la lista HTML, la convertimos
     if not data.get("FUENTES_TEXTO") and data.get("LISTA_FUENTES_CON_ENLACES"):
         data["FUENTES_TEXTO"] = _html_list_to_text_bullets(data["LISTA_FUENTES_CON_ENLACES"])
 
@@ -240,7 +241,7 @@ def main():
     text_body = render_placeholders(text_body_tpl, data)
     html_body = render_placeholders(html_tpl, data)
 
-    # Arreglo extra: si el cuerpo de texto aún contiene <li>…</li>, lo convertimos a viñetas
+    # Si el cuerpo de texto aún contiene <li>…</li>, conviértelo a viñetas
     if "<li" in text_body or "</li>" in text_body:
         text_body = _html_list_to_text_bullets(text_body)
 
@@ -250,7 +251,7 @@ def main():
     html_subject = render_subject_candidate(html_subject_tpl, data)
     subject = subject_override or text_subject or html_subject or "DORA Daily Digest"
 
-    html_block = wrap_codeblock("html", html_body)
+    html_block_md = wrap_codeblock("html", html_body)
 
     # DRY-RUN si preview_out o env NOTIFY_DRY_RUN
     dry_run = bool(args.preview_out) or is_truthy_env("NOTIFY_DRY_RUN")
@@ -265,7 +266,9 @@ def main():
     # Previsualización (no envío)
     if dry_run:
         preview_dir = args.preview_out or ".github/out/preview"
-        write_preview(preview_dir, subject, html_block, f"{subject}\n\n{text_body}" if args.also_text else text_body)
+        # Si also-text: incluye subject en text_body al inicio para comparar; si no, deja solo el cuerpo.
+        preview_text = f"{subject}\n\n{text_body}" if args.also_text else text_body
+        write_preview(preview_dir, subject, html_block_md, preview_text, html_body)
         print(f"[preview] Escribí previsualización en: {preview_dir}")
         return
 
@@ -273,7 +276,7 @@ def main():
 
     if "telegram" in selected:
         try:
-            send_telegram(f"{subject}\n\n{html_block}", subject=subject, dry_run=False)
+            send_telegram(f"{subject}\n\n{html_block_md}", subject=subject, dry_run=False)
             if args.also_text and text_body.strip():
                 for chunk in chunk_text(f"{subject}\n\n{text_body}", limit=3900):
                     send_telegram(chunk, subject=subject, dry_run=False)
@@ -282,7 +285,7 @@ def main():
 
     if "teams" in selected:
         try:
-            payload = f"**{subject}**\n\n{html_block}"
+            payload = f"**{subject}**\n\n{html_block_md}"
             send_teams(payload, subject=subject, dry_run=False)
             if args.also_text and text_body.strip():
                 send_teams(f"**{subject} (texto plano)**\n\n```\n{text_body}\n```", subject=subject, dry_run=False)
