@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 # scripts/build_digest_data.py
-import os, json, glob
+import os, json, glob, re
 from datetime import datetime, timezone, timedelta
 from typing import Dict, Any, List, Optional
 
@@ -124,7 +124,6 @@ def build_key_observation(items: List[Dict[str, Any]], counts: Dict[str, int]) -
     active_total = counts.get("INC_ACTIVOS", 0) or 0
     maint_total = counts.get("MANTENIMIENTOS_HOY", 0) or 0
 
-    # Vendors con actividad (por conteo, no por texto)
     active_vendors = [ (it.get("vendor") or "").strip()
                        for it in items if int(safe_get(it, ["counts", "active"], 0) or 0) > 0 ]
     active_vendors = [v for v in active_vendors if v]
@@ -134,7 +133,6 @@ def build_key_observation(items: List[Dict[str, Any]], counts: Dict[str, int]) -
             return f"Sin incidentes abiertos. Mantenimientos programados hoy: {maint_total}."
         return f"Sin incidentes abiertos en {n_vendors} fabricantes."
 
-    # ¿Crítico?
     any_critical = False
     for it in items:
         txt = (safe_get(it, ["text", "vendor_block"], "") or "").lower()
@@ -142,11 +140,8 @@ def build_key_observation(items: List[Dict[str, Any]], counts: Dict[str, int]) -
             any_critical = True
             break
 
-    # Lista corta de vendors
     head = ", ".join(active_vendors[:3]) if active_vendors else "varios fabricantes"
-    tail = ""
-    if len(active_vendors) > 3:
-        tail = f" (+{len(active_vendors)-3} más)"
+    tail = f" (+{len(active_vendors)-3} más)" if len(active_vendors) > 3 else ""
     if any_critical:
         return f"Alerta: {active_total} incidente(s) activo(s) con posible criticidad. Vendors: {head}{tail}."
     return f"{active_total} incidente(s) activo(s) en {len(active_vendors)} fabricante(s): {head}{tail}."
@@ -161,8 +156,21 @@ def load_overrides(path: Optional[str]) -> Dict[str, str]:
     except Exception:
         return {}
 
+def html_rows_to_text(html_rows: str) -> str:
+    """Convierte filas HTML (<tr><td>…</td>…) en líneas de texto simples."""
+    if not html_rows:
+        return ""
+    s = html_rows
+    s = re.sub(r"</tr\s*>", "\n", s, flags=re.I)
+    s = re.sub(r"</?t[hd]\b[^>]*>", " | ", s, flags=re.I)  # separador de celdas
+    s = re.sub(r"<br\s*/?>", "\n", s, flags=re.I)
+    s = re.sub(r"<[^>]+>", "", s, flags=re.I)  # quita el resto de tags
+    lines = [ln.strip(" |") for ln in s.splitlines()]
+    lines = [ln for ln in lines if ln.strip()]
+    return "\n".join(lines)
+
 def main():
-    import argparse, glob
+    import argparse
     ap = argparse.ArgumentParser()
     ap.add_argument("--vendors-dir", required=True)
     ap.add_argument("--out", required=True)
@@ -189,21 +197,24 @@ def main():
     tables = build_tables_html(items)
     data.update(tables)
 
-    # Fallbacks cuando no hay filas de tabla (texto plano)
-if not data.get("TABLA_INCIDENTES_HOY"):
-    data["TABLA_INCIDENTES_HOY"] = "Sin incidentes registrados en este periodo."
-if not data.get("TABLA_INCIDENTES_15D"):
-    data["TABLA_INCIDENTES_15D"] = "No se han registrado incidentes en este periodo."
-
     # Recomendaciones automáticas
     data.update(infer_operational_recommendations(items, counts))
 
     # Observación clave automática
     data["OBS_CLAVE"] = build_key_observation(items, counts)
 
+    # Fallbacks de texto (AQUÍ estaba tu NameError si lo pusiste fuera de main)
+    # 1) Genera tablas en texto desde filas HTML si existen
+    if not data.get("TABLA_INCIDENTES_HOY"):
+        txt_today = html_rows_to_text(data.get("FILAS_INCIDENTES_HOY", ""))
+        data["TABLA_INCIDENTES_HOY"] = txt_today or "Sin incidentes registrados en este periodo."
+    if not data.get("TABLA_INCIDENTES_15D"):
+        txt_15d = html_rows_to_text(data.get("FILAS_INCIDENTES_15D", ""))
+        data["TABLA_INCIDENTES_15D"] = txt_15d or "No se han registrado incidentes en este periodo."
+
     # Overrides manuales (si vienen)
     overrides = load_overrides(args.overrides)
-    data.update({k: v for k, v in overrides.items() if v is not None and v != ""})
+    data.update({k: v for k, v in overrides.items() if v is not None})
 
     os.makedirs(os.path.dirname(args.out), exist_ok=True)
     with open(args.out, "w", encoding="utf-8") as f:
