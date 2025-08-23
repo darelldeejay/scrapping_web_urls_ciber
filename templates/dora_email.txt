@@ -1,60 +1,35 @@
 Asunto: [DORA] Informe diario de incidentes de proveedores ICT — {{FECHA_UTC}} (UTC)
 
-Hola {{NOMBRE_CONTACTO}},
+Asunto: [DORA] Informe diario de incidentes de proveedores ICT — {{FECHA_UTC}} (UTC)
+
+{{SALUDO_LINEA}}
 
 Compartimos el informe diario de incidentes de terceros tecnológicos (ICT) monitorizados, en apoyo a la resiliencia operativa y a los requisitos de DORA.
 Ventana de observación: {{VENTANA_UTC}} (UTC) · Hora de muestreo: {{HORA_MUESTREO_UTC}} (UTC)
 Alcance: {{NUM_PROVEEDORES}} fabricantes · Fuente: páginas de estado oficiales.
 
 Resumen ejecutivo
-
-Incidentes NUEVOS hoy: {{INC_NUEVOS_HOY}}
-
-Incidentes ACTIVOS: {{INC_ACTIVOS}}
-
-Incidentes RESUELTOS hoy: {{INC_RESUELTOS_HOY}}
-
-Mantenimientos programados hoy: {{MANTENIMIENTOS_HOY}}
-
-Observación clave (si aplica): {{OBS_CLAVE}}
+- Incidentes nuevos hoy: {{INC_NUEVOS_HOY}}
+- Incidentes activos: {{INC_ACTIVOS}}
+- Incidentes resueltos hoy: {{INC_RESUELTOS_HOY}}
+- Mantenimientos programados hoy: {{MANTENIMIENTOS_HOY}}
+- Observación clave: {{OBS_CLAVE}}
 
 Incidentes HOY (UTC)
-Fabricante	ID/Enlace	Estado	Severidad	Servicios/Ámbito	Inicio	Últ. act./Fin	Duración	Comentarios
-{{TABLA_INCIDENTES_HOY}}								
+{{TABLA_INCIDENTES_HOY}}
+(si no aparecen filas, no hay registros agregados para este periodo)
+
 Incidentes últimos 15 días (resueltos)
-Fabricante	ID/Enlace	Severidad	Servicios/Ámbito	Inicio	Fin	Duración	Comentarios
-{{TABLA_INCIDENTES_15D}}							
-Detalle por fabricante
-{{FABRICANTE_A}} — {{TIMESTAMP_UTC}}
-
-Estado general / componentes: {{RESUMEN_COMPONENTES}}
-
-Incidentes hoy: {{DETALLE_INCIDENTES_HOY_FABRICANTE}}
-
-{{FABRICANTE_B}} — {{TIMESTAMP_UTC}}
-
-Estado general / componentes: {{RESUMEN_COMPONENTES}}
-
-Incidentes hoy: {{DETALLE_INCIDENTES_HOY_FABRICANTE}}
-
-(Repetir por cada fabricante: Akamai (Guardicore), Netskope, Trend Micro, Qualys, Proofpoint, Imperva, CyberArk, Aruba, etc.)
+{{TABLA_INCIDENTES_15D}}
+(si no aparecen filas, no hay registros agregados para este periodo)
 
 Recomendaciones operativas
-
-Impacto en servicios del cliente: {{IMPACTO_CLIENTE_SI_NO}}
-
-Acción sugerida (si aplica): {{ACCION_SUGERIDA}}
-
-Próxima revisión programada: {{FECHA_SIGUIENTE_REPORTE}} (UTC)
-
-Notas de cumplimiento DORA
-
-Este informe soporta la monitorización continua de terceros ICT y el registro trazable de eventos (timestamps en UTC, fuente y enlace).
-
-La severidad se clasifica como: Critical / High / Medium / Low (criterios internos {{ENLACE_O_REFERENCIA_INTERNA}}).
+- Impacto en servicios del cliente: {{IMPACTO_CLIENTE_SI_NO}}
+- Acción sugerida (si aplica): {{ACCION_SUGERIDA}}
+- Próxima revisión programada: {{FECHA_SIGUIENTE_REPORTE}} (UTC)
 
 Fuentes
-{{LISTA_FUENTES_ENLACES}}
+{{LISTA_FUENTES_CON_ENLACES}}
 
 Cualquier duda o si deseas ampliar detalle de algún incidente, avísanos.
 
