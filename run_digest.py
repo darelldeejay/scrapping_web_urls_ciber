@@ -230,6 +230,8 @@ def main():
     ap.add_argument("--data")
     ap.add_argument("--channels", default="telegram,teams", help="telegram,teams,both,none")
     ap.add_argument("--preview-out", help="Directorio para previsualización (no envía)")
+    # Compatibilidad: aceptar --also-text pero ignorarlo (ya enviamos texto a Telegram y HTML a Teams)
+    ap.add_argument("--also-text", action="store_true", help="(compat) ignorado; Telegram ya recibe texto")
     args = ap.parse_args()
 
     data = inject_defaults(load_data(args.data))
