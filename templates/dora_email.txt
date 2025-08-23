@@ -21,6 +21,9 @@ Incidentes últimos 15 días (resueltos)
 {{TABLA_INCIDENTES_15D}}
 (si no aparecen filas, no hay registros agregados para este periodo)
 
+Detalle por fabricante (texto enviado a canales)
+{{DETALLES_POR_VENDOR_TEXTO}}
+
 Recomendaciones operativas
 - Impacto en servicios del cliente: {{IMPACTO_CLIENTE_SI_NO}}
 - Acción sugerida (si aplica): {{ACCION_SUGERIDA}}
