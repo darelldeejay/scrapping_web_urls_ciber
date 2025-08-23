@@ -6,13 +6,13 @@ on:
       send_channels:
         description: "Dónde enviar"
         required: true
-        default: "none"   # para pruebas sin enviar nada
+        default: "none"   # cambia a 'both' si quieres que al lanzar manual SÍ envíe
         type: choice
         options: [none, telegram, teams, both]
       dry_run:
         description: "Solo previsualización (no envía)"
         required: true
-        default: "true"
+        default: "true"   # cambia a 'false' si quieres que al lanzar manual SÍ envíe
         type: boolean
       also_text:
         description: "Incluir versión de texto en el mensaje"
@@ -57,10 +57,10 @@ jobs:
           TELEGRAM_BOT_TOKEN: ${{ secrets.TELEGRAM_BOT_TOKEN }}
           TELEGRAM_USER_ID: ${{ secrets.TELEGRAM_USER_ID }}
           TEAMS_WEBHOOK_URL: ${{ secrets.TEAMS_WEBHOOK_URL }}
-          # === NUEVO: capturar salida de notificaciones para el digest
+          # Captura para el digest
           DIGEST_CAPTURE: "1"
           DIGEST_OUT_DIR: .github/out/vendors
-          # Dry-run solo cuando se ejecuta manualmente y el input 'dry_run' es true
+          # Dry-run solo cuando lanzas manual y pides dry_run:true
           NOTIFY_DRY_RUN: ${{ github.event_name == 'workflow_dispatch' && inputs.dry_run || 'false' }}
         run: |
           # Ejecución normal (mantén tu lógica)
@@ -98,6 +98,7 @@ jobs:
         uses: actions/download-artifact@v4
         with:
           pattern: vendor-*
+        # merge-multiple: true junto con path fusiona; en v4 es un flag separado:
           merge-multiple: true
           path: .github/out/vendors
         continue-on-error: true
@@ -117,12 +118,27 @@ jobs:
           [ -z "$DRY" ] && DRY="false"
           ALSO="${{ inputs.also_text }}"
           [ -z "$ALSO" ] && ALSO="false"
-
+          echo "CHANNELS=$CHANNELS" | tee -a $GITHUB_STEP_SUMMARY
+          echo "NOTIFY_DRY_RUN=$DRY" | tee -a $GITHUB_STEP_SUMMARY
+          echo "ALSO_TEXT=$ALSO" | tee -a $GITHUB_STEP_SUMMARY
           echo "CHANNELS=$CHANNELS" >> $GITHUB_ENV
           echo "NOTIFY_DRY_RUN=$DRY" >> $GITHUB_ENV
           echo "ALSO_TEXT=$ALSO" >> $GITHUB_ENV
 
-      - name: Send or preview digest
+      - name: Verify notify secrets (only when sending)
+        if: env.NOTIFY_DRY_RUN == 'false' && env.CHANNELS != 'none'
+        run: |
+          missing=0
+          if [ -z "${{ secrets.TELEGRAM_BOT_TOKEN }}" ]; then echo "Missing TELEGRAM_BOT_TOKEN"; missing=1; fi
+          if [ -z "${{ secrets.TELEGRAM_USER_ID }}" ]; then echo "Missing TELEGRAM_USER_ID"; missing=1; fi
+          if [ -z "${{ secrets.TEAMS_WEBHOOK_URL }}" ]; then echo "Missing TEAMS_WEBHOOK_URL"; missing=1; fi
+          if [ "$missing" -eq 1 ]; then
+            echo "Required secrets are missing; aborting send." >&2
+            exit 1
+          fi
+
+      - name: Send digest
+        if: env.CHANNELS != 'none'
         env:
           TELEGRAM_BOT_TOKEN: ${{ secrets.TELEGRAM_BOT_TOKEN }}
           TELEGRAM_USER_ID: ${{ secrets.TELEGRAM_USER_ID }}
@@ -143,8 +159,18 @@ jobs:
           echo "[RUN] $CMD"
           eval $CMD
 
+      - name: Always build preview artifact (even if sent)
+        # Siempre generamos el "mail" renderizado para inspección
+        run: |
+          python run_digest.py \
+            --text-template templates/dora_email.txt \
+            --html-template templates/dora_email.html \
+            --data .github/out/digest_data.json \
+            --channels none \
+            --preview-out .github/out/preview \
+            $([ "${{ env.ALSO_TEXT }}" = "true" ] && echo "--also-text" || true)
+
       - name: Upload digest preview
-        if: env.NOTIFY_DRY_RUN == 'true'
         uses: actions/upload-artifact@v4
         with:
           name: digest-preview
