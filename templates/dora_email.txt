@@ -1,4 +1,4 @@
-Asunto: [DORA] Informe diario de incidentes de proveedores ICT — {{FECHA_UTC}} (UTC)
+Asunto: [BANCO PICHINCHA - DORA] Informe diario de incidentes de proveedores ICT — {{FECHA_UTC}} (UTC)
 
 {{SALUDO_LINEA}}
 
