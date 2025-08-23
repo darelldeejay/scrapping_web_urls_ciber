@@ -2,34 +2,38 @@
 <html lang="es">
   <head>
     <meta charset="utf-8">
-    <title>[DORA] Informe diario — {{FECHA_UTC}} (UTC)</title>
+    <title>[BANCO PICHINCHA - DORA] Informe diario — {{FECHA_UTC}} (UTC)</title>
     <meta name="viewport" content="width=device-width, initial-scale=1">
-    <!-- Estilos inline-friendly para clientes de correo -->
+    <!-- Estilos seguros para clientes de correo -->
     <style>
       body { font-family: Arial, Helvetica, sans-serif; margin:0; padding:0; background:#f6f8fb; color:#111; }
       .container { max-width: 900px; margin: 0 auto; background:#ffffff; padding: 24px; }
       h1 { font-size: 20px; margin: 0 0 12px; }
       h2 { font-size: 16px; margin: 24px 0 8px; }
-      h3 { font-size: 14px; margin: 16px 0 6px; }
-      p, li { font-size: 14px; line-height: 1.4; margin: 6px 0; }
+      p, li { font-size: 14px; line-height: 1.45; margin: 6px 0; }
       .meta { font-size: 12px; color:#555; }
-      .tag { display:inline-block; background:#eef3ff; border:1px solid #d6e2ff; color:#1a3ea9; border-radius:4px; padding:2px 6px; font-size:12px; margin-right:6px; }
       .summary { background:#f4f9f4; border:1px solid #d8eed8; padding:12px; border-radius:6px; }
-      table { border-collapse: collapse; width:100%; font-size: 13px; }
-      th, td { border: 1px solid #e5e7eb; padding: 8px; text-align: left; vertical-align: top; }
-      th { background: #f3f4f6; }
-      .footer { font-size:12px; color:#666; margin-top:24px; }
-      a { color:#0b57d0; }
-      .divider { height:1px; background:#e5e7eb; margin:16px 0; }
       .pill { padding:2px 6px; border-radius:999px; border:1px solid #ddd; font-size:11px; }
-      .ok { background:#ecfdf5; border-color:#10b981; color:#065f46; }
-      .warn { background:#fff7ed; border-color:#f59e0b; color:#7c2d12; }
-      .crit { background:#fef2f2; border-color:#ef4444; color:#7f1d1d; }
       .muted { color:#555; }
+      .divider { height:1px; background:#e5e7eb; margin:16px 0; }
+      a { color:#0b57d0; }
       ul { padding-left:18px; }
       .header { display:flex; justify-content:space-between; align-items:center; }
       .header small { color:#555; }
-      .badge { background:#eef2ff; border:1px solid #c7d2fe; color:#3730a3; padding:2px 8px; border-radius:12px; font-size:12px; }
+      .greeting { margin: 12px 0 18px; font-size: 14px; }
+
+      /* Bloque de detalle por vendor (texto preformateado) */
+      .vendor-block {
+        white-space: pre-wrap;       /* respeta saltos de línea */
+        word-wrap: break-word;
+        border: 1px solid #e5e7eb;
+        background: #fafafa;
+        border-radius: 6px;
+        padding: 12px;
+        font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, "Liberation Mono", monospace;
+        font-size: 13px;
+        line-height: 1.4;
+      }
     </style>
   </head>
   <body>
@@ -39,105 +43,32 @@
         <small class="muted">{{FECHA_UTC}} · {{HORA_MUESTREO_UTC}} (UTC)</small>
       </div>
 
+      <p class="greeting">{{SALUDO_LINEA}}</p>
+
+      <p>
+        Compartimos el informe diario de incidentes de terceros tecnológicos (ICT) monitorizados, en apoyo a la resiliencia operativa y a los requisitos de DORA. Importante mencionar que se especifica que la hora que se representa los datos es UTC porque en muchas páginas de los fabricantes se presenta otros usos horarios, estos son convertidos a la hora donde reside el cliente.
+      </p>
       <p class="meta">
-        Ventana de observación: <strong>{{VENTANA_UTC}}</strong> (UTC) ·
+        Ventana de observación (UTC): <strong>{{VENTANA_UTC}}</strong> ·
         Alcance: <strong>{{NUM_PROVEEDORES}}</strong> fabricantes ·
-        Fuente: páginas de estado oficiales (scraping automatizado).
+        Fuente: Páginas de estado oficiales ofrecidas por los fabricantes.
       </p>
 
+      <div class="divider"></div>
+
+      <h2>Detalles por fabricante</h2>
+      <div class="vendor-block">{{DETALLES_POR_VENDOR_TEXTO}}</div>
+
+      <h2>Resumen ejecutivo</h2>
       <div class="summary">
-        <strong>Resumen ejecutivo</strong>
         <ul>
           <li>Incidentes <strong>nuevos hoy</strong>: {{INC_NUEVOS_HOY}}</li>
           <li>Incidentes <strong>activos</strong>: {{INC_ACTIVOS}}</li>
           <li>Incidentes <strong>resueltos hoy</strong>: {{INC_RESUELTOS_HOY}}</li>
-          <li><span class="pill warn">Mantenimiento</span> programado hoy: {{MANTENIMIENTOS_HOY}}</li>
-          <li>Observación clave: {{OBS_CLAVE}}</li>
+          <li><span class="pill">Mantenimiento</span> programado hoy: {{MANTENIMIENTOS_HOY}}</li>
+          <li><strong>Observación clave:</strong> {{OBS_CLAVE}}</li>
         </ul>
       </div>
-
-      <h2>Incidentes hoy (UTC)</h2>
-      <table role="table" aria-label="Incidentes hoy">
-        <thead>
-          <tr>
-            <th>Fabricante</th>
-            <th>ID / Enlace</th>
-            <th>Estado</th>
-            <th>Severidad</th>
-            <th>Servicios / Ámbito</th>
-            <th>Inicio</th>
-            <th>Últ. act. / Fin</th>
-            <th>Duración</th>
-            <th>Comentarios</th>
-          </tr>
-        </thead>
-        <tbody>
-          {{FILAS_INCIDENTES_HOY}}
-          <!--
-          Ejemplo de fila:
-          <tr>
-            <td>Netskope</td>
-            <td><a href="{{URL_INCIDENTE}}">Incident 3937590</a></td>
-            <td><span class="pill ok">Resolved</span></td>
-            <td>Medium</td>
-            <td>AM2, FR4, ZUR2</td>
-            <td>2025-08-20 08:35 UTC</td>
-            <td>2025-08-20 10:30 UTC</td>
-            <td>1h 55m</td>
-            <td>Impacto intermitente en DCs indicados.</td>
-          </tr>
-          -->
-        </tbody>
-      </table>
-
-      <h2>Incidentes últimos 15 días (resueltos)</h2>
-      <table role="table" aria-label="Incidentes últimos 15 días">
-        <thead>
-          <tr>
-            <th>Fabricante</th>
-            <th>ID / Enlace</th>
-            <th>Severidad</th>
-            <th>Servicios / Ámbito</th>
-            <th>Inicio</th>
-            <th>Fin</th>
-            <th>Duración</th>
-            <th>Comentarios</th>
-          </tr>
-        </thead>
-        <tbody>
-          {{FILAS_INCIDENTES_15D}}
-        </tbody>
-      </table>
-
-      <div class="divider"></div>
-
-      <h2>Detalle por fabricante</h2>
-
-      <!-- Bloque por fabricante: repetir este bloque por cada uno -->
-      <h3>Akamai (Guardicore) — <span class="muted">{{AKAMAI_TIMESTAMP_UTC}}</span></h3>
-      <p>
-        <span class="badge">Estado general</span> {{AKAMAI_ESTADO_GENERAL}}<br>
-        <span class="badge">Componentes</span> {{AKAMAI_COMPONENTES_RESUMEN}}
-      </p>
-      <ul>
-        <li><strong>Incidentes hoy:</strong> {{AKAMAI_INCIDENTES_HOY}}</li>
-        <li><strong>Observaciones:</strong> {{AKAMAI_OBS}}</li>
-      </ul>
-
-      <h3>Netskope — <span class="muted">{{NETSKOPE_TIMESTAMP_UTC}}</span></h3>
-      <ul>
-        <li><strong>Incidentes activos:</strong> {{NETSKOPE_ACTIVOS}}</li>
-        <li><strong>Incidentes últimos 15 días:</strong>
-          <ul>
-            {{NETSKOPE_LISTA_15D}}
-            <!-- Ejemplo (siguiendo tu formato):
-            <li>Resolved — Incident 3937590 (AM2, FR4, ZUR2). Inicio: 2025-08-20 08:35 UTC · Fin: 2025-08-20 10:30 UTC</li>
-            -->
-          </ul>
-        </li>
-      </ul>
-
-      <!-- Repetir bloques similares para Trend Micro, Qualys, Proofpoint, Imperva, CyberArk, Aruba Central, etc. -->
 
       <div class="divider"></div>
 
@@ -148,22 +79,15 @@
         <li><strong>Próxima revisión programada:</strong> {{FECHA_SIGUIENTE_REPORTE}} (UTC)</li>
       </ul>
 
-      <h2>Notas de cumplimiento DORA</h2>
-      <ul>
-        <li>Registro trazable con hora en <strong>UTC</strong>, fuente y enlace por incidente.</li>
-        <li>Clasificación de severidad: <em>Critical / High / Medium / Low</em> según criterios internos {{ENLACE_O_TEXTO_CRITERIOS}}.</li>
-        <li>Monitorización continua de terceros ICT y seguimiento de eventos de indisponibilidad/degradación y mantenimiento.</li>
-      </ul>
-
       <h2>Fuentes</h2>
       <ul>
         {{LISTA_FUENTES_CON_ENLACES}}
       </ul>
 
-      <p class="footer">
-        Si necesitas más detalle de algún incidente o impacto, responde a este correo.<br>
-        Atentamente,<br>
-        {{FIRMA_HTML}}
+      <div class="divider"></div>
+
+      <p class="meta">
+        Cualquier duda o si deseas ampliar detalle de algún incidente, nuestro equipo de SOC queda a vuestra entera disposición.
       </p>
     </div>
   </body>
