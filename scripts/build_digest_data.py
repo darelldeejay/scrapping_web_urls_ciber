@@ -189,6 +189,12 @@ def main():
     tables = build_tables_html(items)
     data.update(tables)
 
+    # Fallbacks cuando no hay filas de tabla (texto plano)
+if not data.get("TABLA_INCIDENTES_HOY"):
+    data["TABLA_INCIDENTES_HOY"] = "Sin incidentes registrados en este periodo."
+if not data.get("TABLA_INCIDENTES_15D"):
+    data["TABLA_INCIDENTES_15D"] = "No se han registrado incidentes en este periodo."
+
     # Recomendaciones automáticas
     data.update(infer_operational_recommendations(items, counts))
 
