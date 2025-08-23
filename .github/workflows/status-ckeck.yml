@@ -6,25 +6,25 @@ on:
       send_channels:
         description: "Dónde enviar"
         required: true
-        default: "none"   # cambia a 'both' si quieres que al lanzar manual SÍ envíe
+        default: "both"   # telegram, teams, both, none
         type: choice
         options: [none, telegram, teams, both]
       dry_run:
         description: "Solo previsualización (no envía)"
         required: true
-        default: "true"   # cambia a 'false' si quieres que al lanzar manual SÍ envíe
+        default: "true"
         type: boolean
       also_text:
-        description: "Incluir versión de texto en el mensaje"
+        description: "Incluir versión de texto en el mensaje (compat; no necesario)"
         required: false
         default: "false"
         type: boolean
-      impacto:
+      impacto_override:
         description: "Impacto en servicios del cliente (override opcional)"
         required: false
         default: ""
         type: string
-      accion:
+      accion_override:
         description: "Acción sugerida (override opcional)"
         required: false
         default: ""
@@ -40,7 +40,7 @@ concurrency:
 
 jobs:
   vendors:
-    name: Scraping vendors
+    name: Scraping vendors (solo export JSON)
     runs-on: ubuntu-latest
     strategy:
       fail-fast: false
@@ -62,20 +62,9 @@ jobs:
       - name: Prepare out dirs
         run: mkdir -p .github/out/vendors
 
-      - name: Run ${{ matrix.vendor }}
-        env:
-          TELEGRAM_BOT_TOKEN: ${{ secrets.TELEGRAM_BOT_TOKEN }}
-          TELEGRAM_USER_ID: ${{ secrets.TELEGRAM_USER_ID }}
-          TEAMS_WEBHOOK_URL: ${{ secrets.TEAMS_WEBHOOK_URL }}
-          # Captura para el digest (texto por vendor)
-          DIGEST_CAPTURE: "1"
-          DIGEST_OUT_DIR: .github/out/vendors
-          # Dry-run sólo en lanzamientos manuales con dry_run:true
-          NOTIFY_DRY_RUN: ${{ github.event_name == 'workflow_dispatch' && inputs.dry_run || 'false' }}
+      # ⛔️ Ya NO enviamos mensajes por vendor; solo exportamos JSON
+      - name: Export ${{ matrix.vendor }} to JSON (no notify)
         run: |
-          # Ejecución normal (mantén tu lógica por vendor)
-          python run_vendor.py --vendor ${{ matrix.vendor }}
-          # Export JSON para el digest (leerá la captura si existe)
           python run_vendor.py --vendor ${{ matrix.vendor }} --export-json ".github/out/vendors/${{ matrix.vendor }}.json" || true
 
       - name: Upload vendor summary (per-vendor artifact)
@@ -88,7 +77,7 @@ jobs:
           retention-days: 7
 
   digest:
-    name: Build & send digest
+    name: Build & send digest (Telegram=texto, Teams=HTML)
     runs-on: ubuntu-latest
     needs: vendors
     if: always()
@@ -112,34 +101,12 @@ jobs:
           path: .github/out/vendors
         continue-on-error: true
 
-      # NUEVO: escribir overrides de forma segura (escapa comillas/ñ/acentos)
-      - name: Write optional overrides
-        env:
-          IMPACTO: ${{ inputs.impacto }}
-          ACCION: ${{ inputs.accion }}
-        run: |
-          python - <<'PY'
-          import json, os, pathlib
-          d = {}
-          imp = os.getenv("IMPACTO") or ""
-          acc = os.getenv("ACCION") or ""
-          if imp.strip():
-              d["IMPACTO_CLIENTE_SI_NO"] = imp
-          if acc.strip():
-              d["ACCION_SUGERIDA"] = acc
-          out = pathlib.Path(".github/out/overrides.json")
-          out.parent.mkdir(parents=True, exist_ok=True)
-          with out.open("w", encoding="utf-8") as f:
-              json.dump(d, f, ensure_ascii=False, indent=2)
-          print("overrides:", d)
-          PY
-
       - name: Build digest data JSON
         run: |
           python scripts/build_digest_data.py \
             --vendors-dir .github/out/vendors \
             --out .github/out/digest_data.json \
-            --overrides .github/out/overrides.json
+            ${ { '': '' } } # placeholder no-op
 
       - name: Compute flags
         id: flags
@@ -150,39 +117,33 @@ jobs:
           [ -z "$DRY" ] && DRY="false"
           ALSO="${{ inputs.also_text }}"
           [ -z "$ALSO" ] && ALSO="false"
-          echo "CHANNELS=$CHANNELS" | tee -a $GITHUB_STEP_SUMMARY
-          echo "NOTIFY_DRY_RUN=$DRY" | tee -a $GITHUB_STEP_SUMMARY
-          echo "ALSO_TEXT=$ALSO" | tee -a $GITHUB_STEP_SUMMARY
+          IMPACTO="${{ inputs.impacto_override }}"
+          ACCION="${{ inputs.accion_override }}"
+
           echo "CHANNELS=$CHANNELS" >> $GITHUB_ENV
           echo "NOTIFY_DRY_RUN=$DRY" >> $GITHUB_ENV
           echo "ALSO_TEXT=$ALSO" >> $GITHUB_ENV
 
-      # Verifica secrets solo del/los canal/es seleccionados
-      - name: Verify notify secrets (only for selected channels)
-        if: env.NOTIFY_DRY_RUN == 'false' && env.CHANNELS != 'none'
-        run: |
-          missing=0
-          case "${{ env.CHANNELS }}" in
-            telegram)
-              if [ -z "${{ secrets.TELEGRAM_BOT_TOKEN }}" ]; then echo "Missing TELEGRAM_BOT_TOKEN"; missing=1; fi
-              if [ -z "${{ secrets.TELEGRAM_USER_ID }}" ]; then echo "Missing TELEGRAM_USER_ID"; missing=1; fi
-              ;;
-            teams)
-              if [ -z "${{ secrets.TEAMS_WEBHOOK_URL }}" ]; then echo "Missing TEAMS_WEBHOOK_URL"; missing=1; fi
-              ;;
-            both)
-              if [ -z "${{ secrets.TELEGRAM_BOT_TOKEN }}" ]; then echo "Missing TELEGRAM_BOT_TOKEN"; missing=1; fi
-              if [ -z "${{ secrets.TELEGRAM_USER_ID }}" ]; then echo "Missing TELEGRAM_USER_ID"; missing=1; fi
-              if [ -z "${{ secrets.TEAMS_WEBHOOK_URL }}" ]; then echo "Missing TEAMS_WEBHOOK_URL"; missing=1; fi
-              ;;
-          esac
-          if [ "$missing" -eq 1 ]; then
-            echo "Required secrets for selected channel(s) are missing; aborting send." >&2
-            exit 1
+          # Si hay overrides, creamos un pequeño JSON para que run_digest lo absorba
+          if [ -n "$IMPACTO" ] || [ -n "$ACCION" ]; then
+            echo "{\"IMPACTO_CLIENTE_SI_NO\":\"$IMPACTO\",\"ACCION_SUGERIDA\":\"$ACCION\"}" > .github/out/overrides.json
+            echo "OVERRIDES_PATH=.github/out/overrides.json" >> $GITHUB_ENV
+          else
+            echo "OVERRIDES_PATH=" >> $GITHUB_ENV
           fi
 
-      - name: Send digest
-        if: env.CHANNELS != 'none'
+      - name: Merge overrides (optional)
+        if: env.OVERRIDES_PATH != ''
+        run: |
+          python - << 'PY'
+          import json, sys
+          base = json.load(open(".github/out/digest_data.json","r",encoding="utf-8"))
+          over = json.load(open(".github/out/overrides.json","r",encoding="utf-8"))
+          base.update({k:v for k,v in over.items() if v != ""})
+          json.dump(base, open(".github/out/digest_data.json","w",encoding="utf-8"), ensure_ascii=False, indent=2)
+          PY
+
+      - name: Send or preview digest
         env:
           TELEGRAM_BOT_TOKEN: ${{ secrets.TELEGRAM_BOT_TOKEN }}
           TELEGRAM_USER_ID: ${{ secrets.TELEGRAM_USER_ID }}
@@ -194,6 +155,7 @@ jobs:
             --html-template templates/dora_email.html \
             --data .github/out/digest_data.json \
             --channels \"$CHANNELS\""
+          # Compatibilidad (no hace nada, pero el script acepta la flag)
           if [ "$ALSO_TEXT" = "true" ]; then
             CMD="$CMD --also-text"
           fi
@@ -203,18 +165,8 @@ jobs:
           echo "[RUN] $CMD"
           eval $CMD
 
-      # Genera siempre el preview del "correo" (texto + HTML) para auditoría
-      - name: Always build preview artifact (even if sent)
-        run: |
-          python run_digest.py \
-            --text-template templates/dora_email.txt \
-            --html-template templates/dora_email.html \
-            --data .github/out/digest_data.json \
-            --channels none \
-            --preview-out .github/out/preview \
-            --also-text
-
       - name: Upload digest preview
+        if: env.NOTIFY_DRY_RUN == 'true'
         uses: actions/upload-artifact@v4
         with:
           name: digest-preview
