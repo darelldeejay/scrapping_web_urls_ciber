@@ -6,14 +6,7 @@ Compartimos el informe diario de incidentes de terceros tecnológicos (ICT) moni
 Ventana de observación: {{VENTANA_UTC}} · Hora de muestreo: {{HORA_MUESTREO_UTC}} (UTC)
 Alcance: {{NUM_PROVEEDORES}} fabricantes · Fuente: Páginas de estado oficiales ofrecidas por los fabricantes.
 
-Incidentes registrados con fecha de HOY
-{{TABLA_INCIDENTES_HOY}}
-
-Incidentes registrados en los últimos 15 días (resueltos)
-{{TABLA_INCIDENTES_15D}}
-
 Detalles por fabricante:
-
 {{DETALLES_POR_VENDOR_TEXTO}}
 
 Resumen ejecutivo
@@ -21,8 +14,7 @@ Resumen ejecutivo
 - Incidentes activos: {{INC_ACTIVOS}}
 - Incidentes resueltos hoy: {{INC_RESUELTOS_HOY}}
 - Mantenimientos programados hoy: {{MANTENIMIENTOS_HOY}}
-
-Resumen y observación clave según la información antes brindada: {{OBS_CLAVE}}
+- Observación clave: {{OBS_CLAVE}}
 
 Recomendaciones operativas
 - Impacto en servicios del cliente: {{IMPACTO_CLIENTE_SI_NO}}
