@@ -2,13 +2,13 @@
 <html lang="es">
   <head>
     <meta charset="utf-8">
-    <title>[BANCO PICHINCHA - DORA] Informe diario — {{FECHA_UTC}} (UTC)</title>
+    <title>[BANCO PICHINCHA - DORA] Informe diario de incidentes de proveedores ICT — {{FECHA_UTC}} (UTC)</title>
     <meta name="viewport" content="width=device-width, initial-scale=1">
     <!-- Estilos seguros para clientes de correo -->
     <style>
       body { font-family: Arial, Helvetica, sans-serif; margin:0; padding:0; background:#f6f8fb; color:#111; }
       .container { max-width: 900px; margin: 0 auto; background:#ffffff; padding: 24px; }
-      h1 { font-size: 20px; margin: 0 0 12px; }
+      h1 { font-size: 20px; margin: 0 0 4px; }
       h2 { font-size: 16px; margin: 24px 0 8px; }
       p, li { font-size: 14px; line-height: 1.45; margin: 6px 0; }
       .meta { font-size: 12px; color:#555; }
@@ -18,7 +18,7 @@
       .divider { height:1px; background:#e5e7eb; margin:16px 0; }
       a { color:#0b57d0; }
       ul { padding-left:18px; }
-      .header { display:flex; justify-content:space-between; align-items:center; }
+      .header { display:flex; justify-content:space-between; align-items:flex-start; gap:12px; }
       .header small { color:#555; }
       .greeting { margin: 12px 0 18px; font-size: 14px; }
 
@@ -39,8 +39,11 @@
   <body>
     <div class="container">
       <div class="header">
-        <h1>Informe diario de incidentes de proveedores ICT — DORA</h1>
-        <small class="muted">{{FECHA_UTC}} · {{HORA_MUESTREO_UTC}} (UTC)</small>
+        <!-- H1 = asunto exacto que quieres ver como primera línea -->
+        <div>
+          <h1>[BANCO PICHINCHA - DORA] Informe diario de incidentes de proveedores ICT — {{FECHA_UTC}} (UTC)</h1>
+          <small class="muted">Hora de muestreo: {{HORA_MUESTREO_UTC}} (UTC)</small>
+        </div>
       </div>
 
       <p class="greeting">{{SALUDO_LINEA}}</p>
