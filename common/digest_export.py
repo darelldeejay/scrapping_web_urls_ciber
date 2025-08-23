@@ -1,8 +1,8 @@
 # common/digest_export.py
 # -*- coding: utf-8 -*-
-import os, json
+import os, json, re
 from datetime import datetime, timezone
-from typing import Any, Dict, List
+from typing import Any, Dict, List, Optional
 
 def now_utc_iso() -> str:
     return datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ")
@@ -22,6 +22,7 @@ def mk_skeleton(vendor: str) -> Dict[str, Any]:
         "counts": {"new_today": 0, "active": 0, "resolved_today": 0, "maintenance_today": 0},
         "tables": {"today_rows_html": "", "past15_rows_html": ""},
         "sources": [],
+        "text": {"vendor_block": ""},  # ⬅️ NUEVO
     }
 
 def extract_sources_from_module(mod) -> List[str]:
@@ -45,7 +46,11 @@ def extract_sources_from_module(mod) -> List[str]:
 def escape_html(s: str) -> str:
     return s.replace("&","&amp;").replace("<","&lt;").replace(">","&gt;")
 
-def _read_capture(vendor: str) -> str | None:
+# ---------- Capturas ----------
+
+HEADER_RE = re.compile(r"^\[\d{4}-\d{2}-\d{2}T.*?Z\]\s*<([a-zA-Z0-9_]+)>\s*$")
+
+def _read_capture(vendor: str) -> Optional[str]:
     out_dir = os.getenv("DIGEST_OUT_DIR", ".github/out/vendors")
     path = os.path.join(out_dir, f"{vendor}.capture.txt")
     if os.path.exists(path):
@@ -56,13 +61,71 @@ def _read_capture(vendor: str) -> str | None:
             return None
     return None
 
+def _extract_channel_blocks(capture_text: str, prefer: str) -> List[str]:
+    """
+    Devuelve bloques de texto para un canal concreto (p.ej. 'telegram' o 'teams').
+    La captura tiene secciones con cabecera: [timestamp] <canal>
+    """
+    if not capture_text:
+        return []
+    lines = capture_text.splitlines()
+    blocks: List[List[str]] = []
+    current: List[str] = []
+    in_chan: Optional[str] = None
+
+    for ln in lines:
+        m = HEADER_RE.match(ln.strip())
+        if m:
+            # Nueva cabecera: cerramos bloque anterior
+            chan = (m.group(1) or "").strip().lower()
+            if in_chan == prefer and current:
+                blocks.append(current)
+            # reseteamos
+            current = []
+            in_chan = chan
+            continue
+
+        # Acumulamos líneas sólo si estamos dentro del canal preferido
+        if in_chan == prefer:
+            current.append(ln)
+
+    # último bloque
+    if in_chan == prefer and current:
+        blocks.append(current)
+
+    # Limpieza: recorta espacios/lineas vacías en extremos de cada bloque
+    out: List[str] = []
+    for b in blocks:
+        # strip leading/trailing empties
+        start = 0
+        end = len(b)
+        while start < end and not b[start].strip():
+            start += 1
+        while end > start and not b[end-1].strip():
+            end -= 1
+        if start < end:
+            out.append("\n".join(b[start:end]))
+    return out
+
+def _prefer_vendor_block(capture_text: str) -> str:
+    # Intentamos Telegram (más plano)
+    tg = _extract_channel_blocks(capture_text, "telegram")
+    if tg:
+        return "\n\n".join(tg)
+    # Fallback: Teams
+    tm = _extract_channel_blocks(capture_text, "teams")
+    if tm:
+        return "\n\n".join(tm)
+    # Nada: devolvemos captura completa (raro, pero mejor que vacío)
+    return (capture_text or "").strip()
+
 def _build_from_capture(vendor: str, capture_text: str) -> Dict[str, Any]:
     data = mk_skeleton(vendor)
     if not capture_text:
         return data
 
+    # Heurística de conteo (sobre la captura completa)
     lines = [ln.strip() for ln in capture_text.splitlines() if ln.strip()]
-    # Heurística simple de conteo
     active = resolved = maint = 0
     today_rows = []
     for ln in lines:
@@ -73,11 +136,9 @@ def _build_from_capture(vendor: str, capture_text: str) -> Dict[str, Any]:
             resolved += 1
         if "maintenance" in low or "scheduled" in low:
             maint += 1
-
-        # Fila HTML si parece “línea útil” (descartamos marcas de canal/ts)
-        if not (low.startswith("[") and ("] <" in low or "]<" in low)):
-            # Evitar duplicar títulos vacíos
-            if len(ln) >= 6 and not ln.startswith("**"):
+        # Fila HTML “mínima” para el panel de hoy (si no es cabecera de captura)
+        if not HEADER_RE.match(ln):
+            if len(ln) >= 3:
                 today_rows.append(
                     f"<tr><td>{vendor}</td><td>-</td><td>{escape_html(ln)}</td>"
                     f"<td>-</td><td>-</td><td>-</td><td>-</td><td>-</td><td>-</td></tr>"
@@ -86,16 +147,22 @@ def _build_from_capture(vendor: str, capture_text: str) -> Dict[str, Any]:
     data["counts"]["active"] = active
     data["counts"]["resolved_today"] = resolved
     data["counts"]["maintenance_today"] = maint
-    data["tables"]["today_rows_html"] = "\n".join(today_rows[:200])  # cap por si acaso
+    data["tables"]["today_rows_html"] = "\n".join(today_rows[:200])
+
+    # ⬅️ Bloque de texto por vendor (preferimos Telegram)
+    data["text"]["vendor_block"] = _prefer_vendor_block(capture_text)
+
     return data
+
+# ---------- Export principal ----------
 
 def export_with_fallback(mod, driver, vendor_name: str) -> Dict[str, Any]:
     """
     Preferencias:
-      0) (nuevo) Si hay captura de notify -> construir digest desde ahí.
-      1) export_for_digest(driver) -> esquema estándar
-      2) collect(driver) (legacy) -> normalizar (si algún día vuelve)
-      3) Esqueleto con sources.
+      0) Captura de notificaciones -> construye datos + bloque de texto por vendor.
+      1) export_for_digest(driver) -> esquema estándar (si lo implementas en un vendor).
+      2) collect(driver) legacy -> normalizar (por compatibilidad).
+      3) Esqueleto mínimo con sources.
     """
     # 0) Desde captura
     cap = _read_capture(vendor_name)
@@ -117,17 +184,18 @@ def export_with_fallback(mod, driver, vendor_name: str) -> Dict[str, Any]:
                     raw["timestamp_utc"] = now_utc_iso()
                 if not raw.get("sources"):
                     raw["sources"] = extract_sources_from_module(mod)
+                if "text" not in raw:
+                    raw["text"] = {"vendor_block": ""}
                 return raw
         except Exception:
             pass
 
-    # 2) collect(driver) legacy (no lo tienes, pero mantenemos por compat)
+    # 2) collect(driver) legacy (si reaparece)
     collector = getattr(mod, "collect", None)
     if callable(collector):
         try:
             raw = collector(driver)
             if isinstance(raw, dict):
-                # Normalización básica
                 out = mk_skeleton(vendor_name)
                 incs = (raw.get("incidents_lines") or [])
                 active = resolved = maint = 0
@@ -150,6 +218,8 @@ def export_with_fallback(mod, driver, vendor_name: str) -> Dict[str, Any]:
                 out["counts"]["maintenance_today"] = maint
                 out["tables"]["today_rows_html"] = "\n".join(rows[:200])
                 out["sources"] = raw.get("sources", []) or extract_sources_from_module(mod)
+                # Texto por vendor (compacto)
+                out["text"]["vendor_block"] = "\n".join(incs).strip()
                 return out
         except Exception:
             pass
