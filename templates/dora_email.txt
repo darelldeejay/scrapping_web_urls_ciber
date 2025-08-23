@@ -1,7 +1,5 @@
 Asunto: [DORA] Informe diario de incidentes de proveedores ICT — {{FECHA_UTC}} (UTC)
 
-Asunto: [DORA] Informe diario de incidentes de proveedores ICT — {{FECHA_UTC}} (UTC)
-
 {{SALUDO_LINEA}}
 
 Compartimos el informe diario de incidentes de terceros tecnológicos (ICT) monitorizados, en apoyo a la resiliencia operativa y a los requisitos de DORA.
