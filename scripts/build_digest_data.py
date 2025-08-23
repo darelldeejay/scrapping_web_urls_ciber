@@ -1,8 +1,17 @@
 #!/usr/bin/env python3
-# scripts/build_digest_data.py
-import os, json, glob
-from datetime import datetime, timezone
-from typing import Dict, Any, List
+import os, json, glob, re
+from datetime import datetime, timezone, timedelta
+from typing import Dict, Any, List, Optional
+from zoneinfo import ZoneInfo
+
+KEYWORDS_CRITICAL = (
+    "critical", "major", "sev-1", "sev1", "p1", "security", "ddos", "ransom",
+    "outage", "total", "unavailable"
+)
+KEYWORDS_ACTIVE = (
+    "investigating", "degraded", "partial", "intermittent", "impact", "latency",
+    "performance", "disruption"
+)
 
 def load_vendor_jsons(vendors_dir: str) -> List[Dict[str, Any]]:
     paths = sorted(glob.glob(os.path.join(vendors_dir, "*.json")))
@@ -38,7 +47,7 @@ def build_tables_html(items: List[Dict[str, Any]]) -> Dict[str, str]:
         "FILAS_INCIDENTES_15D": "\n".join(rows_15d),
     }
 
-def build_counts(items: List[Dict[str, Any]]) -> Dict[str, str]:
+def build_counts(items: List[Dict[str, Any]]) -> Dict[str, int]:
     new_today = active = resolved_today = maint_today = 0
     for it in items:
         c = safe_get(it, ["counts"], {}) or {}
@@ -47,10 +56,10 @@ def build_counts(items: List[Dict[str, Any]]) -> Dict[str, str]:
         resolved_today += int(c.get("resolved_today", 0) or 0)
         maint_today += int(c.get("maintenance_today", 0) or 0)
     return {
-        "INC_NUEVOS_HOY": str(new_today),
-        "INC_ACTIVOS": str(active),
-        "INC_RESUELTOS_HOY": str(resolved_today),
-        "MANTENIMIENTOS_HOY": str(maint_today),
+        "INC_NUEVOS_HOY": new_today,
+        "INC_ACTIVOS": active,
+        "INC_RESUELTOS_HOY": resolved_today,
+        "MANTENIMIENTOS_HOY": maint_today,
     }
 
 def build_sources(items: List[Dict[str, Any]]) -> str:
@@ -62,42 +71,97 @@ def build_sources(items: List[Dict[str, Any]]) -> str:
     return "\n".join(links)
 
 def build_vendor_text(items: List[Dict[str, Any]]) -> str:
-    """
-    Une el texto de cada vendor (tal cual fue enviado al canal) en un bloque.
-    Formato:
-      === VENDOR ===
-      <texto>
-    """
     blocks: List[str] = []
     for it in items:
         vendor = (it.get("vendor") or "").strip() or "vendor"
         block = (safe_get(it, ["text", "vendor_block"], "") or "").strip()
         if not block:
-            # Si no hay bloque, dejamos constancia explícita:
             block = "No incidents reported today."
         blocks.append(f"=== {vendor.upper()} ===\n{block}")
     return "\n\n".join(blocks)
+
+def infer_operational_recommendations(items: List[Dict[str, Any]], counts: Dict[str, int]) -> Dict[str, str]:
+    """
+    Heurística simple:
+    - Impacto: "Sí" si hay activos>0 y aparecen keywords críticas; "Posible" si activos>0; "No" si 0.
+    - Acción: escalado si crítico; monitorización si solo activo; sin acción si no hay activo.
+    """
+    active = counts.get("INC_ACTIVOS", 0)
+    any_critical = False
+    for it in items:
+        txt = (safe_get(it, ["text", "vendor_block"], "") or "") + " " + \
+              " ".join((safe_get(it, ["tables", "today_rows_html"], "") or "").split("<"))
+        low = txt.lower()
+        if any(k in low for k in KEYWORDS_CRITICAL):
+            any_critical = True
+            break
+    if active > 0 and any_critical:
+        return {
+            "IMPACTO_CLIENTE_SI_NO": "Sí (potencialmente crítico)",
+            "ACCION_SUGERIDA": "Escalar a proveedor/es y comunicación interna; monitorización reforzada hasta resolución."
+        }
+    if active > 0:
+        return {
+            "IMPACTO_CLIENTE_SI_NO": "Posible",
+            "ACCION_SUGERIDA": "Monitorización reforzada y verificación de servicios dependientes."
+        }
+    return {
+        "IMPACTO_CLIENTE_SI_NO": "No",
+        "ACCION_SUGERIDA": "Sin acción."
+    }
+
+def compute_next_review_date_str() -> str:
+    """
+    Próxima revisión = mañana (fecha en UTC). Si prefieres la próxima a las 08:30 Europe/Madrid,
+    puedes calcularla aquí y devolver solo la fecha.
+    """
+    return (datetime.now(timezone.utc) + timedelta(days=1)).strftime("%Y-%m-%d")
+
+def load_overrides(path: Optional[str]) -> Dict[str, str]:
+    if not path:
+        return {}
+    try:
+        with open(path, "r", encoding="utf-8") as f:
+            data = json.load(f)
+        return {k: ("" if v is None else str(v)) for k, v in data.items()}
+    except Exception:
+        return {}
 
 def main():
     import argparse
     ap = argparse.ArgumentParser()
     ap.add_argument("--vendors-dir", required=True)
     ap.add_argument("--out", required=True)
+    ap.add_argument("--overrides", help="JSON con campos que sobrescriben (IMPACTO_CLIENTE_SI_NO, ACCION_SUGERIDA, FECHA_SIGUIENTE_REPORTE)")
     args = ap.parse_args()
 
     items = load_vendor_jsons(args.vendors_dir)
-    now = datetime.now(timezone.utc)
+    counts = build_counts(items)
 
     data: Dict[str, Any] = {
-        "NUM_PROVEEDORES": str(len(items)) if items else "",
+        "NUM_PROVEEDORES": str(len(items)) if items else "0",
         "OBS_CLAVE": "",
         "LISTA_FUENTES_CON_ENLACES": build_sources(items),
-        "FECHA_SIGUIENTE_REPORTE": (now.strftime("%Y-%m-%d")),
-        # ⬇️ NUEVO: bloque concatenado por vendor
+        "FECHA_SIGUIENTE_REPORTE": compute_next_review_date_str(),  # <-- mañana
         "DETALLES_POR_VENDOR_TEXTO": build_vendor_text(items),
+        "FILAS_INCIDENTES_HOY": "",
+        "FILAS_INCIDENTES_15D": "",
+        "INC_NUEVOS_HOY": str(counts["INC_NUEVOS_HOY"]),
+        "INC_ACTIVOS": str(counts["INC_ACTIVOS"]),
+        "INC_RESUELTOS_HOY": str(counts["INC_RESUELTOS_HOY"]),
+        "MANTENIMIENTOS_HOY": str(counts["MANTENIMIENTOS_HOY"]),
     }
-    data.update(build_tables_html(items))
-    data.update(build_counts(items))
+    # Tablas HTML agregadas
+    tables = build_tables_html(items)
+    data.update(tables)
+
+    # Heurística automática
+    recs = infer_operational_recommendations(items, counts)
+    data.update(recs)
+
+    # Overrides manuales (si vienen)
+    overrides = load_overrides(args.overrides)
+    data.update({k: v for k, v in overrides.items() if v is not None})
 
     os.makedirs(os.path.dirname(args.out), exist_ok=True)
     with open(args.out, "w", encoding="utf-8") as f:
