@@ -3,7 +3,6 @@
 from __future__ import annotations
 
 import os
-import json
 import requests
 from datetime import datetime, timezone
 from typing import Optional
@@ -28,26 +27,41 @@ def _capture_write(channel: str, text: str) -> None:
         f.write(f"\n[{ts}] <{channel}>\n{text}\n")
 
 def send_telegram(text: str) -> None:
+    # Captura para el digest (si procede)
     _capture_write("telegram", text)
+
+    # Dry-run: no envía nada real
     if _is_truthy_env("NOTIFY_DRY_RUN"):
         return
+
     token = os.getenv("TELEGRAM_BOT_TOKEN")
     chat_id = os.getenv("TELEGRAM_USER_ID")
     if not token or not chat_id:
-        # No reventar si falta secret; la captura ya quedó grabada
+        # Falta secret: no reventamos el flujo (la captura ya quedó)
         return
+
     url = TELEGRAM_API.format(token=token)
-    # Telegram máx ~4096; enviamos tal cual (tus módulos suelen ser compactos)
-    r = requests.post(url, json={"chat_id": chat_id, "text": text}, timeout=30)
-    # No lanzamos excepción dura en notificaciones del flujo principal
+    try:
+        requests.post(url, json={"chat_id": chat_id, "text": text}, timeout=30)
+    except Exception:
+        # No propagamos errores de notificación
+        pass
 
 def send_teams(markdown: str, title: Optional[str] = None) -> None:
-    _capture_write("teams", f"{('**'+title+'**\\n\\n') if title else ''}{markdown}")
+    # Para la captura, componemos un encabezado si hay título (sin f-string con backslashes)
+    prefix = ""
+    if title:
+        prefix = "**" + title + "**" + "\n\n"
+    _capture_write("teams", prefix + markdown)
+
+    # Dry-run: no envía nada real
     if _is_truthy_env("NOTIFY_DRY_RUN"):
         return
+
     webhook = os.getenv("TEAMS_WEBHOOK_URL")
     if not webhook:
         return
+
     card = {
         "@type": "MessageCard",
         "@context": "https://schema.org/extensions",
@@ -62,7 +76,7 @@ def send_teams(markdown: str, title: Optional[str] = None) -> None:
         pass
 
 class Notifier:
-    """Compatibilidad con vendors que usan una clase."""
+    """Compatibilidad con vendors que usan una clase Notifier()."""
     def telegram(self, text: str) -> None:
         send_telegram(text)
     def teams(self, text: str, title: Optional[str] = None) -> None:
