@@ -1,1 +1,2 @@
-# Intentionally empty: makes 'common' a proper Python package
+# common/__init__.py
+# (vacío a propósito)
