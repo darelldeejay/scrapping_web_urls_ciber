@@ -9,20 +9,18 @@
         --text:#0f172a; --muted:#64748b; --border:#e5e7eb; --bg:#f6f8fb;
         --summary-bg:#f4f9f4; --summary-bd:#d8eed8; --accent:#4f46e5;
       }
-      /* Base tipográfica */
       body{
         margin:0; padding:0; background:var(--bg); color:var(--text);
         -webkit-text-size-adjust:100%; -ms-text-size-adjust:100%;
         font: 400 15px/1.55 -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Arial, "Helvetica Neue", Helvetica, sans-serif;
       }
-      /* Herencia para clientes estrictos */
       p, li, a, td, span, div{ font-family:inherit; font-size:inherit; line-height:inherit; color:inherit; }
 
       .container{ max-width:760px; margin:0 auto; background:#fff; padding:24px; }
       h1{ font-size:22px; line-height:1.25; margin:0 0 6px; font-weight:700; letter-spacing:-0.2px; }
       h2{ font-size:17px; line-height:1.35; margin:22px 0 8px; font-weight:700; }
-      small{ font-size:12px; color:var(--muted); }   /* solo para “Hora de muestreo” */
-      .muted{ color:var(--muted); }                 /* MISMO tamaño que el texto base */
+      small{ font-size:12px; color:var(--muted); }
+      .muted{ color:var(--muted); }
       a{ color:#0b57d0; text-decoration:none; }
       ul{ padding-left:18px; margin:6px 0; }
       .divider{ height:1px; background:var(--border); margin:16px 0; }
@@ -33,7 +31,6 @@
       .pill{ padding:2px 6px; border-radius:999px; border:1px solid var(--border); font-size:11px; color:#7c3aed; background:#faf5ff; }
       .summary ul, .summary li{ margin:4px 0; }
 
-      /* Bloque por fabricante */
       .vendor-block{
         white-space:pre-wrap; word-wrap:break-word;
         border:1px solid var(--border); background:#f8fafc;
@@ -53,8 +50,7 @@
 
       <p class="greeting">{{SALUDO_LINEA}}</p>
 
-      <p>Compartimos el informe diario de incidentes de terceros tecnológicos (ICT) monitorizados, en apoyo a la resiliencia operativa y a los requisitos de DORA.</p>
-      <!-- AHORA tamaño normal con color atenuado -->
+      <p>Compartimos el informe diario de incidentes de terceros tecnológicos (ICT) monitorizados, en apoyo a la resiliencia operativa y a los requisitos de DORA. Importante mencionar que se especifica que la hora que se representa los datos es UTC porque en muchas páginas de los fabricantes se presenta otros usos horarios, estos son convertidos a la hora donde reside el cliente.</p>
       <p class="muted">
         Ventana de observación (UTC): <strong>{{VENTANA_UTC}}</strong> ·
         Alcance: <strong>{{NUM_PROVEEDORES}}</strong> fabricantes ·
@@ -93,8 +89,11 @@
 
       <div class="divider"></div>
 
-      <!-- TAMBIÉN tamaño normal con color atenuado -->
       <p class="muted">Cualquier duda o si deseas ampliar detalle de algún incidente, nuestro equipo de SOC queda a vuestra entera disposición.</p>
+
+      <!-- NUEVO: cierre con saludo y firma -->
+      <p>Un saludo,</p>
+      <p>{{FIRMA_HTML}}</p>
     </div>
   </body>
 </html>
