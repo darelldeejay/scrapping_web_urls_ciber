@@ -8,6 +8,7 @@ from datetime import datetime, timezone
 from typing import Dict, Optional, List
 
 import requests
+from zoneinfo import ZoneInfo
 
 def is_truthy_env(name: str) -> bool:
     return os.getenv(name, "").strip().lower() in ("1", "true", "yes", "y", "on")
@@ -77,6 +78,31 @@ def load_data(path: Optional[str]) -> Dict[str, str]:
         data = json.load(f)
     return {k: ("" if v is None else str(v)) for k, v in data.items()}
 
+def compute_saludo_and_line(data: Dict[str, str]) -> tuple[str, str]:
+    """
+    Devuelve (SALUDO, SALUDO_LINEA) según hora local (por defecto Europe/Madrid).
+    Si 'NOMBRE_CONTACTO' existe y no está vacío, se añade al saludo.
+    """
+    tzname = os.getenv("GREETING_TZ", "Europe/Madrid")
+    try:
+        now_local = datetime.now(ZoneInfo(tzname))
+    except Exception:
+        now_local = datetime.now()  # fallback sin TZ explícida
+    h = now_local.hour
+    if 6 <= h < 12:
+        saludo = "Buenos días"
+    elif 12 <= h < 21:
+        saludo = "Buenas tardes"
+    else:
+        saludo = "Buenas noches"
+
+    nombre = (data.get("NOMBRE_CONTACTO") or "").strip()
+    if nombre:
+        saludo_linea = f"{saludo} {nombre},"
+    else:
+        saludo_linea = f"{saludo},"
+    return saludo, saludo_linea
+
 def inject_defaults(data: Dict[str, str]) -> Dict[str, str]:
     now_utc = datetime.now(timezone.utc)
     defaults = {
@@ -102,7 +128,12 @@ def inject_defaults(data: Dict[str, str]) -> Dict[str, str]:
         "ACCION_SUGERIDA": data.get("ACCION_SUGERIDA", ""),
         "FECHA_SIGUIENTE_REPORTE": data.get("FECHA_SIGUIENTE_REPORTE", ""),
     }
-    return {**defaults, **data}
+    merged = {**defaults, **data}
+    # Saludo dinámico
+    saludo, saludo_linea = compute_saludo_and_line(merged)
+    merged["SALUDO"] = saludo
+    merged["SALUDO_LINEA"] = saludo_linea
+    return merged
 
 # ---------------- Senders (honran DRY-RUN) ----------------
 
