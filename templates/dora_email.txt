@@ -10,7 +10,7 @@ Incidentes registrados con fecha de HOY
 {{TABLA_INCIDENTES_HOY}}
 (si no aparecen filas, no hay registros agregados para este periodo)
 
-Incidentes últimos 15 días (resueltos)
+Incidentes registrados en los últimos 15 días (resueltos)
 {{TABLA_INCIDENTES_15D}}
 (si no aparecen filas, no hay registros agregados para este periodo)
 
