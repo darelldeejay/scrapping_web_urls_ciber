@@ -141,16 +141,12 @@ def inject_defaults(data: Dict[str, str]) -> Dict[str, str]:
 # ---------------- Normalización para el cuerpo de TEXTO ----------------
 
 LI_RE = re.compile(r"(?is)<li\b[^>]*>(.*?)</li\s*>")
-TAGS_SIMPLE_RE = re.compile(r"(?is)<\/?(?:ul|ol)\b[^>]*>")
+TAGS_SIMPLE_RE = re.compile(r"(?is)</?(?:ul|ol)\b[^>]*>")
 
 def _html_list_to_text_bullets(s: str) -> str:
-    """
-    Convierte cualquier lista HTML <li>…</li> a viñetas '- …' en texto plano.
-    Deja el resto del contenido intacto.
-    """
+    """Convierte listas <li>…</li> a viñetas '- …' en texto plano."""
     if not s or ("<li" not in s and "</li>" not in s):
         return s
-
     def _one_li(m: re.Match) -> str:
         inner = m.group(1) or ""
         inner = re.sub(r"(?is)<[^>]+>", "", inner)
@@ -159,13 +155,12 @@ def _html_list_to_text_bullets(s: str) -> str:
         if not inner:
             inner = "-"
         return f"- {inner}"
-
     out = LI_RE.sub(_one_li, s)
     out = TAGS_SIMPLE_RE.sub("", out)
     out = re.sub(r"\n{3,}", "\n\n", out)
     return out
 
-# ---------------- Senders (honran DRY-RUN) ----------------
+# ---------------- Senders ----------------
 
 def env_or_raise(name: str) -> str:
     val = os.getenv(name)
@@ -173,13 +168,15 @@ def env_or_raise(name: str) -> str:
         raise RuntimeError(f"Falta la variable de entorno requerida: {name}")
     return val
 
-def send_telegram(markdown: str, subject: Optional[str], dry_run: bool) -> None:
+def send_telegram_text(subject: str, text_body: str, dry_run: bool) -> None:
+    """Envía SOLO TEXTO a Telegram (asunto + cuerpo)."""
     if dry_run:
         return
     token = env_or_raise("TELEGRAM_BOT_TOKEN")
     chat_id = env_or_raise("TELEGRAM_USER_ID")
     url = f"https://api.telegram.org/bot{token}/sendMessage"
-    for chunk in chunk_text(markdown, limit=3900):
+    full = f"{subject}\n\n{text_body}".strip()
+    for chunk in chunk_text(full, limit=3900):
         r = requests.post(url, json={"chat_id": chat_id, "text": chunk}, timeout=30)
         if r.status_code != 200:
             msg = r.text
@@ -187,14 +184,22 @@ def send_telegram(markdown: str, subject: Optional[str], dry_run: bool) -> None:
                 msg = msg[:600] + "...(truncado)"
             raise RuntimeError(f"Telegram error ({r.status_code}): {msg}")
 
-def send_teams(markdown: str, subject: Optional[str], dry_run: bool) -> None:
+def send_teams_html(subject: str, html_block_md: str, dry_run: bool) -> None:
+    """
+    Envía a Teams (webhook) un MessageCard con:
+      - title = subject
+      - text  = bloque HTML dentro de un code fence (markdown)
+    """
     if dry_run:
         return
     webhook = env_or_raise("TEAMS_WEBHOOK_URL")
-    title = subject or "DORA Daily Digest"
     card = {
-        "@type": "MessageCard","@context": "https://schema.org/extensions",
-        "summary": title,"themeColor": "2B579A","title": title,"text": markdown
+        "@type": "MessageCard",
+        "@context": "https://schema.org/extensions",
+        "summary": subject,
+        "themeColor": "2B579A",
+        "title": subject,
+        "text": html_block_md  # HTML en bloque pegable
     }
     r = requests.post(webhook, json=card, timeout=30)
     if r.status_code >= 300:
@@ -213,24 +218,22 @@ def write_preview(preview_dir: str, subject: str, html_block_md: str, text_body:
         f.write(html_block_md)
     with open(os.path.join(preview_dir, "text_body.txt"), "w", encoding="utf-8") as f:
         f.write(text_body)
-    # NUEVO: HTML renderizable
     with open(os.path.join(preview_dir, "email.html"), "w", encoding="utf-8") as f:
         f.write(html_raw)
 
 # ---------------- Main ----------------
 
 def main():
-    ap = argparse.ArgumentParser(description="Enviar plantillas DORA como mensaje 'pegable' a Telegram/Teams")
+    ap = argparse.ArgumentParser(description="Enviar plantillas DORA: Teams=HTML, Telegram=text")
     ap.add_argument("--text-template", default="templates/dora_email.txt")
     ap.add_argument("--html-template", default="templates/dora_email.html")
     ap.add_argument("--data")
     ap.add_argument("--channels", default="telegram,teams", help="telegram,teams,both,none")
-    ap.add_argument("--also-text", action="store_true")
-    ap.add_argument("--preview-out", help="Directorio donde guardar previsualización (subject/html/text). Implica no enviar.")
+    ap.add_argument("--preview-out", help="Directorio para previsualización (no envía)")
     args = ap.parse_args()
 
     data = inject_defaults(load_data(args.data))
-    # Fallback: si falta FUENTES_TEXTO pero hay la lista HTML, la convertimos
+    # Fallback: si falta FUENTES_TEXTO pero hay la lista HTML, conviértela
     if not data.get("FUENTES_TEXTO") and data.get("LISTA_FUENTES_CON_ENLACES"):
         data["FUENTES_TEXTO"] = _html_list_to_text_bullets(data["LISTA_FUENTES_CON_ENLACES"])
 
@@ -251,6 +254,7 @@ def main():
     html_subject = render_subject_candidate(html_subject_tpl, data)
     subject = subject_override or text_subject or html_subject or "DORA Daily Digest"
 
+    # Bloque HTML para canales que no renderizan HTML (Teams -> code fence)
     html_block_md = wrap_codeblock("html", html_body)
 
     # DRY-RUN si preview_out o env NOTIFY_DRY_RUN
@@ -266,29 +270,23 @@ def main():
     # Previsualización (no envío)
     if dry_run:
         preview_dir = args.preview_out or ".github/out/preview"
-        # Si also-text: incluye subject en text_body al inicio para comparar; si no, deja solo el cuerpo.
-        preview_text = f"{subject}\n\n{text_body}" if args.also_text else text_body
-        write_preview(preview_dir, subject, html_block_md, preview_text, html_body)
+        write_preview(preview_dir, subject, html_block_md, f"{subject}\n\n{text_body}", html_body)
         print(f"[preview] Escribí previsualización en: {preview_dir}")
         return
 
     errors: List[str] = []
 
+    # TELEGRAM -> TEXTO
     if "telegram" in selected:
         try:
-            send_telegram(f"{subject}\n\n{html_block_md}", subject=subject, dry_run=False)
-            if args.also_text and text_body.strip():
-                for chunk in chunk_text(f"{subject}\n\n{text_body}", limit=3900):
-                    send_telegram(chunk, subject=subject, dry_run=False)
+            send_telegram_text(subject, text_body, dry_run=False)
         except Exception as e:
             errors.append(f"Telegram: {e}")
 
+    # TEAMS -> HTML (code fence)
     if "teams" in selected:
         try:
-            payload = f"**{subject}**\n\n{html_block_md}"
-            send_teams(payload, subject=subject, dry_run=False)
-            if args.also_text and text_body.strip():
-                send_teams(f"**{subject} (texto plano)**\n\n```\n{text_body}\n```", subject=subject, dry_run=False)
+            send_teams_html(subject, html_block_md, dry_run=False)
         except Exception as e:
             errors.append(f"Teams: {e}")
 
