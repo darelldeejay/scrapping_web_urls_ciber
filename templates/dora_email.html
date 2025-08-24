@@ -5,83 +5,82 @@
     <title>[BANCO PICHINCHA - DORA] Informe diario de incidentes de proveedores ICT — {{FECHA_UTC}} (UTC)</title>
     <meta name="viewport" content="width=device-width, initial-scale=1">
     <style>
-      :root{
-        --text:#0f172a; --muted:#64748b; --border:#e5e7eb; --bg:#f6f8fb;
-        --summary-bg:#f4f9f4; --summary-bd:#d8eed8; --accent:#4f46e5;
+      /* Estilos compatibles con clientes de correo */
+      body { margin:0; padding:0; background:#f6f8fb; color:#0b1220; }
+      .container { max-width:900px; margin:0 auto; background:#ffffff; padding:24px; font-family: -apple-system, BlinkMacSystemFont, Segoe UI, Roboto, Arial, Helvetica, sans-serif; }
+      h1 { font-size:22px; line-height:1.25; margin:0 0 8px; font-weight:700; }
+      h2 { font-size:18px; line-height:1.35; margin:20px 0 8px; font-weight:700; }
+      h3 { font-size:15px; line-height:1.35; margin:16px 0 6px; font-weight:700; }
+      p, li { font-size:14px; line-height:1.55; margin:6px 0; }
+      .meta { font-size:14px; color:#374151; margin-top:4px; }
+      .divider { height:1px; background:#e5e7eb; margin:18px 0; }
+      ul { padding-left:18px; }
+      a { color:#0b57d0; text-decoration:none; }
+      a:hover { text-decoration:underline; }
+      small.muted { color:#6b7280; }
+      .header { display:flex; justify-content:space-between; align-items:flex-end; gap:12px; flex-wrap:wrap; }
+      .badge { background:#eef2ff; border:1px solid #c7d2fe; color:#1e3a8a; padding:2px 8px; border-radius:12px; font-size:12px; display:inline-block; }
+      /* Tarjeta suave para bloques largos en monoespaciado */
+      .mono {
+        margin:12px 0; padding:12px;
+        background:#f8fafc; border:1px solid #e5e7eb; border-radius:8px;
+        font-family:Consolas,"Courier New",ui-monospace,Menlo,Monaco,monospace;
+        font-size:14px; line-height:1.5;
+        white-space:pre-wrap; word-break:break-word;
       }
-      body{
-        margin:0; padding:0; background:var(--bg); color:var(--text);
-        -webkit-text-size-adjust:100%; -ms-text-size-adjust:100%;
-        font: 400 15px/1.55 -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Arial, "Helvetica Neue", Helvetica, sans-serif;
-      }
-      p, li, a, td, span, div{ font-family:inherit; font-size:inherit; line-height:inherit; color:inherit; }
-
-      .container{ max-width:760px; margin:0 auto; background:#fff; padding:24px; }
-      h1{ font-size:22px; line-height:1.25; margin:0 0 6px; font-weight:700; letter-spacing:-0.2px; }
-      h2{ font-size:17px; line-height:1.35; margin:22px 0 8px; font-weight:700; }
-      small{ font-size:12px; color:var(--muted); }
-      .muted{ color:var(--muted); }
-      a{ color:#0b57d0; text-decoration:none; }
-      ul{ padding-left:18px; margin:6px 0; }
-      .divider{ height:1px; background:var(--border); margin:16px 0; }
-
-      .greeting{ margin:10px 0 16px; }
-
-      .summary{ background:var(--summary-bg); border:1px solid var(--summary-bd); padding:12px; border-radius:6px; }
-      .pill{ padding:2px 6px; border-radius:999px; border:1px solid var(--border); font-size:11px; color:#7c3aed; background:#faf5ff; }
-      .summary ul, .summary li{ margin:4px 0; }
-
-      .vendor-block{
-        white-space:pre-wrap; word-wrap:break-word;
-        border:1px solid var(--border); background:#f8fafc;
-        border-radius:8px; padding:14px; position:relative;
-      }
-      .vendor-block::before{
-        content:""; position:absolute; left:0; top:0; bottom:0; width:4px;
-        background:var(--accent); border-radius:8px 0 0 8px;
-      }
-      li{ font-size:15px; }
+      .footer { font-size:14px; color:#111; margin-top:12px; }
     </style>
   </head>
   <body>
     <div class="container">
-      <h1>[BANCO PICHINCHA - DORA] Informe diario de incidentes de proveedores ICT — {{FECHA_UTC}} (UTC)</h1>
-      <small>Hora de muestreo: {{HORA_MUESTREO_UTC}} (UTC)</small>
+      <!-- Encabezado -->
+      <div class="header">
+        <h1>Informe diario de incidentes de proveedores ICT — DORA</h1>
+        <small class="muted">{{FECHA_UTC}} · {{HORA_MUESTREO_UTC}} (UTC)</small>
+      </div>
 
-      <p class="greeting">{{SALUDO_LINEA}}</p>
-
-      <p>Compartimos el informe diario de incidentes de terceros tecnológicos (ICT) monitorizados, en apoyo a la resiliencia operativa y a los requisitos de DORA. Importante mencionar que se especifica que la hora que se representa los datos es UTC porque en muchas páginas de los fabricantes se presenta otros husos horarios, estos son convertidos a la hora donde reside el cliente.</p>
-      <p class="muted">
-        Ventana de observación (UTC): <strong>{{VENTANA_UTC}}</strong> ·
-        Alcance: <strong>{{NUM_PROVEEDORES}}</strong> fabricantes ·
-        Fuente: Páginas de estado oficiales ofrecidas por los fabricantes.
+      <!-- Saludo + intro -->
+      <p>{{SALUDO_LINEA}}</p>
+      <p>
+        Compartimos el informe diario de incidentes de terceros tecnológicos (ICT) monitorizados, en apoyo a la resiliencia operativa y a los requisitos de DORA.
+      </p>
+      <p class="meta">
+        <strong>Ventana de observación (UTC):</strong> {{VENTANA_UTC}} ·
+        <strong>Alcance:</strong> {{NUM_PROVEEDORES}} fabricantes ·
+        <strong>Fuente:</strong> Páginas de estado oficiales ofrecidas por los fabricantes.
       </p>
 
       <div class="divider"></div>
 
+      <!-- Detalles por fabricante -->
       <h2>Detalles por fabricante</h2>
-      <div class="vendor-block">{{DETALLES_POR_VENDOR_TEXTO}}</div>
-
-      <h2>Resumen ejecutivo</h2>
-      <div class="summary">
-        <ul>
-          <li>Incidentes <strong>nuevos hoy</strong>: {{INC_NUEVOS_HOY}}</li>
-          <li>Incidentes <strong>activos</strong>: {{INC_ACTIVOS}}</li>
-          <li>Incidentes <strong>resueltos hoy</strong>: {{INC_RESUELTOS_HOY}}</li>
-          <li><span class="pill">Mantenimiento</span> programado hoy: {{MANTENIMIENTOS_HOY}}</li>
-          <li><strong>Observación clave:</strong> {{OBS_CLAVE}}</li>
-        </ul>
-      </div>
+      <pre class="mono">{{DETALLES_POR_VENDOR_TEXTO}}</pre>
 
       <div class="divider"></div>
 
+      <!-- Resumen ejecutivo -->
+      <h2>Resumen ejecutivo</h2>
+      <ul>
+        <li>Incidentes <strong>nuevos hoy</strong>: {{INC_NUEVOS_HOY}}</li>
+        <li>Incidentes <strong>activos</strong>: {{INC_ACTIVOS}}</li>
+        <li>Incidentes <strong>resueltos hoy</strong>: {{INC_RESUELTOS_HOY}}</li>
+        <li>Mantenimientos programados hoy: {{MANTENIMIENTOS_HOY}}</li>
+      </ul>
+      <p><strong>Observación clave:</strong> {{OBS_CLAVE}}</p>
+
+      <div class="divider"></div>
+
+      <!-- Recomendaciones -->
       <h2>Recomendaciones operativas</h2>
       <ul>
         <li><strong>Impacto en servicios del cliente:</strong> {{IMPACTO_CLIENTE_SI_NO}}</li>
-        <li><strong>Acción sugerida:</strong> {{ACCION_SUGERIDA}}</li>
+        <li><strong>Acción sugerida (si aplica):</strong> {{ACCION_SUGERIDA}}</li>
         <li><strong>Próxima revisión programada:</strong> {{FECHA_SIGUIENTE_REPORTE}} (UTC)</li>
       </ul>
 
+      <div class="divider"></div>
+
+      <!-- Fuentes -->
       <h2>Fuentes</h2>
       <ul>
         {{LISTA_FUENTES_CON_ENLACES}}
@@ -89,11 +88,10 @@
 
       <div class="divider"></div>
 
-      <p class="muted">Cualquier duda o si deseas ampliar detalle de algún incidente, nuestro equipo de SOC queda a vuestra entera disposición.</p>
-
-      <!-- NUEVO: cierre con saludo y firma -->
-      <p>Un saludo,</p>
-      <p>{{FIRMA_HTML}}</p>
+      <!-- Despedida -->
+      <p class="footer">Cualquier duda o si deseas ampliar detalle de algún incidente, nuestro equipo de SOC queda a vuestra entera disposición.</p>
+      <p class="footer">Un saludo,</p>
+      <p class="footer">{{FIRMA_HTML}}</p>
     </div>
   </body>
 </html>
