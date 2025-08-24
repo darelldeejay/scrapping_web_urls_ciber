@@ -75,7 +75,6 @@ def load_data(path: Optional[str]) -> Dict[str, str]:
     return {k: ("" if v is None else str(v)) for k, v in data.items()}
 
 def _saludo_linea(now_utc: datetime) -> str:
-    # Saludo simple por hora UTC (puedes adaptar a Europe/Madrid si lo deseas)
     h = int(now_utc.strftime("%H"))
     if 6 <= h < 12:
         return "Buenos días,"
@@ -153,18 +152,17 @@ def send_teams(markdown: str, subject: Optional[str], dry_run: bool) -> None:
 
 def write_preview(preview_dir: str, subject: str, html_block_md: str, html_body: str, text_body: str) -> None:
     os.makedirs(preview_dir, exist_ok=True)
+    # Asunto
     with open(os.path.join(preview_dir, "subject.txt"), "w", encoding="utf-8") as f:
         f.write(subject)
-    # MD con bloque de código HTML (para ver fácilmente en GitHub)
+    # HTML (bloque MD y archivo .html real)
     with open(os.path.join(preview_dir, "html_block.md"), "w", encoding="utf-8") as f:
         f.write(html_block_md)
-    # HTML real (para abrir en navegador / cliente)
     with open(os.path.join(preview_dir, "email.html"), "w", encoding="utf-8") as f:
         f.write(html_body)
-    # Texto plano (opcional)
-    if text_body.strip():
-        with open(os.path.join(preview_dir, "text_body.txt"), "w", encoding="utf-8") as f:
-            f.write(text_body)
+    # TXT SIEMPRE (como antes)
+    with open(os.path.join(preview_dir, "text_body.txt"), "w", encoding="utf-8") as f:
+        f.write(text_body)
 
 # ---------------- Main ----------------
 
@@ -174,7 +172,7 @@ def main():
     ap.add_argument("--html-template", default="templates/dora_email.html")
     ap.add_argument("--data")
     ap.add_argument("--channels", default="telegram,teams", help="telegram,teams,both,none")
-    ap.add_argument("--also-text", action="store_true")
+    ap.add_argument("--also-text", action="store_true")  # se mantiene por compatibilidad, pero ya no afecta al preview
     ap.add_argument("--preview-out", help="Directorio donde guardar previsualización (subject/html/text). Implica no enviar.")
     args = ap.parse_args()
 
@@ -200,9 +198,8 @@ def main():
     # Previsualización (no envío)
     if dry_run:
         preview_dir = args.preview_out or ".github/out/preview"
-        # Si --also-text, incluye el txt en el preview
-        preview_text = f"{subject}\n\n{text_body}" if args.also_text else ""
-        write_preview(preview_dir, subject, html_block, html_body, preview_text)
+        # Siempre guardamos el cuerpo TXT (como estaba), y añadimos el HTML real.
+        write_preview(preview_dir, subject, html_block, html_body, text_body)
         print(f"[preview] Escribí previsualización en: {preview_dir}")
         return
 
@@ -211,7 +208,6 @@ def main():
     # Telegram → SOLO versión texto (como acordado)
     if "telegram" in selected:
         try:
-            # Enviar asunto + cuerpo de texto
             for chunk in chunk_text(f"{subject}\n\n{text_body}", limit=3900):
                 send_telegram(chunk, subject=subject, dry_run=False)
         except Exception as e:
