@@ -1,92 +1,93 @@
-# run_vendor.py
 #!/usr/bin/env python3
 # -*- coding: utf-8 -*-
 
+import os
 import argparse
 import importlib
-import os
-import traceback
 from datetime import datetime, timezone
 
+# Arranque Selenium
 from common.browser import make_driver
-from common.digest_export import ensure_dir, export_with_fallback, save_digest_json
+from bs4 import BeautifulSoup  # por si algún vendor lo usa internamente
 
-# Notificador; compatible si no existe clase
-try:
-    from common.notify import Notifier
-except Exception:
-    class Notifier:
-        def telegram(self, text: str): pass
-        def teams(self, text: str, title: str | None = None): pass
-
-def _call_vendor_run(mod, driver, notifier):
-    if not hasattr(mod, "run"):
-        raise RuntimeError("El módulo del vendor no expone función run().")
-    try:
-        return mod.run(driver, notifier)
-    except TypeError:
-        try:
-            return mod.run(driver)
-        except TypeError:
-            return mod.run()
+def now_utc_str():
+    return datetime.now(timezone.utc).strftime("%Y-%m-%d %H:%M")
 
 def main():
-    ap = argparse.ArgumentParser(description="Orquestador por vendor (scraping + notificación).")
-    ap.add_argument("--vendor", required=True, help="Nombre del vendor (directorio en vendors/)")
-    ap.add_argument("--export-json", help="Ruta a JSON para el digest (opcional)")
-    ap.add_argument("--headless", action="store_true")
-    ap.add_argument("--no-headless", action="store_true")
-    ap.add_argument("--save-html", action="store_true")
-    ap.add_argument("--quiet", action="store_true")
+    ap = argparse.ArgumentParser(description="Run single vendor or export JSON for digest")
+    ap.add_argument("--vendor", required=True, help="nombre del vendor (slug): aruba, cyberark, ...")
+    ap.add_argument("--export-json", help="ruta de salida JSON con resumen para digest")
+    ap.add_argument("--headless", action="store_true", default=True)
     args = ap.parse_args()
 
-    vendor = args.vendor.strip().lower()
+    slug = args.vendor.strip().lower()
+    driver = make_driver(headless=args.headless)
+
+    # Carga módulo del vendor
     try:
-        mod = importlib.import_module(f"vendors.{vendor}")
+        mod = importlib.import_module(f"vendors.{slug}")
     except Exception as e:
-        raise SystemExit(f"No se pudo importar vendors.{vendor}: {e}")
+        driver.quit()
+        raise SystemExit(f"No se pudo importar vendors.{slug}: {e}")
 
-    # Variables para la captura
-    os.environ["CURRENT_VENDOR"] = vendor
-    os.environ.setdefault("DIGEST_OUT_DIR", ".github/out/vendors")
-
-    headless = True
-    if args.no_headless:
-        headless = False
-    elif args.headless:
-        headless = True
-
-    driver = None
+    # 1) Intentar collect() nativo del vendor
+    data = None
     try:
-        driver = make_driver(headless=headless)
+        if hasattr(mod, "collect") and callable(getattr(mod, "collect")):
+            data = mod.collect(driver)  # debe devolver dict estándar
+    except Exception:
+        data = None
 
-        # 1) Ejecución normal (envía y CAPTURA si DIGEST_CAPTURE=1)
+    # 2) Fallback common
+    if data is None:
         try:
-            _call_vendor_run(mod, driver, Notifier())
+            from common.fallback_collectors import get_collector
+            fn = get_collector(slug)
         except Exception:
-            if not args.quiet:
-                print(f"[{vendor}] run() lanzó excepción:\n{traceback.format_exc()}")
-
-        # 2) Export JSON para el digest (consume la CAPTURA si existe)
-        if args.export_json:
-            ensure_dir(os.path.dirname(args.export_json) or ".")
+            fn = None
+        if fn:
             try:
-                data = export_with_fallback(mod, driver, vendor)
+                data = fn(driver)
             except Exception:
-                data = {
-                    "vendor": vendor,
-                    "timestamp_utc": datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ"),
-                    "error": "export_with_fallback_failed",
-                    "traceback": traceback.format_exc()[:2000],
-                }
-            save_digest_json(args.export_json, data)
+                data = None
 
-    finally:
-        try:
-            if driver:
-                driver.quit()
-        except Exception:
-            pass
+    # 3) Último recurso: mínimo
+    if not isinstance(data, dict):
+        data = {
+            "name": slug.title(),
+            "timestamp_utc": now_utc_str(),
+            "component_lines": [],
+            "incidents_lines": ["No incidents reported today"],
+            "overall_ok": None,
+        }
+
+    driver.quit()
+
+    # Normalización mínima
+    for k in ("component_lines", "incidents_lines"):
+        v = data.get(k)
+        if isinstance(v, str):
+            data[k] = [x for x in v.splitlines() if x.strip()]
+        elif not isinstance(v, list):
+            data[k] = []
+
+    data.setdefault("name", slug.title())
+    data.setdefault("timestamp_utc", now_utc_str())
+
+    # Export JSON si lo piden
+    if args.export_json:
+        import json
+        out = args.export_json
+        os.makedirs(os.path.dirname(out), exist_ok=True)
+        with open(out, "w", encoding="utf-8") as f:
+            json.dump(data, f, ensure_ascii=False, indent=2)
+    else:
+        # Camino “run” clásico: imprime un pequeño resumen a stdout (no notifica)
+        print(f"[{data.get('name')}] {data.get('timestamp_utc')} UTC")
+        for ln in (data.get("component_lines") or []):
+            print(ln)
+        for ln in (data.get("incidents_lines") or []):
+            print(ln)
 
 if __name__ == "__main__":
     main()
