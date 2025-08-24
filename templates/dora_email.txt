@@ -23,7 +23,7 @@ Recomendaciones operativas
 - Próxima revisión programada: {{FECHA_SIGUIENTE_REPORTE}} (UTC)
 
 Fuentes
-{{LISTA_FUENTES_CON_ENLACES}}
+{{LISTA_FUENTES_TXT}}
 
 Cualquier duda o si deseas ampliar detalle de algún incidente, nuestro equipo de SOC queda a vuestra entera disposición.
 
