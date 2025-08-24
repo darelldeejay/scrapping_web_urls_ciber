@@ -1,9 +1,21 @@
 # vendors/guardicore.py
+# -*- coding: utf-8 -*-
+"""
+Akamai (Guardicore) — soporte dual:
+- run(): tu ejecución clásica con Selenium + notificación (se mantiene intacta)
+- collect(driver): reutiliza el mismo parseo para export JSON (sin notificar)
+  y hace fallback a la API Statuspage si fallara el DOM.
+
+Esto permite conservar todo tu trabajo previo y, a la vez, alimentar el digest
+con datos correctos y estables.
+"""
+
 import os
 import re
 import time
+import json
 import traceback
-from datetime import datetime
+from datetime import datetime, timezone
 
 from bs4 import BeautifulSoup
 from selenium.common.exceptions import TimeoutException
@@ -11,8 +23,16 @@ from selenium.webdriver.common.by import By
 from selenium.webdriver.support.ui import WebDriverWait
 from selenium.webdriver.support import expected_conditions as EC
 
-from common.browser import start_driver
+# Tu browser/notify originales para run()
+from common.browser import start_driver  # run() legacy
 from common.notify import send_telegram, send_teams
+
+# Helper para fallback vía Statuspage
+try:
+    from common.statuspage import build_statuspage_result  # nuevo helper
+    _HAS_STATUSPAGE = True
+except Exception:
+    _HAS_STATUSPAGE = False
 
 URL = "https://www.akamaistatus.com/"
 SAVE_HTML = os.getenv("SAVE_HTML", "0") == "1"
@@ -22,7 +42,12 @@ OPERATIONAL_RE = re.compile(r"\bOperational\b", re.I)
 NO_INCIDENTS_TODAY_RE = re.compile(r"No incidents reported today", re.I)
 
 def now_utc_str():
+    # OJO: esto incluye " UTC" porque lo usabas en mensajes.
+    # Para export JSON, usaremos _now_utc_clean() sin " UTC".
     return datetime.utcnow().strftime("%Y-%m-%d %H:%M UTC")
+
+def _now_utc_clean():
+    return datetime.now(timezone.utc).strftime("%Y-%m-%d %H:%M")
 
 def collapse_ws(s: str) -> str:
     return re.sub(r"\s+", " ", s or "").strip()
@@ -130,7 +155,7 @@ def parse_incidents_today(soup: BeautifulSoup):
 
     return {"date": date_str, "count": len(lines), "items": lines or ["(No details)"]}
 
-# -------- Formato compacto como el ejemplo --------
+# -------- Formato de salida para mensajes (legacy run) --------
 
 def format_message(groups, today_inc):
     lines = [
@@ -143,20 +168,16 @@ def format_message(groups, today_inc):
     for g in groups:
         children = g.get("children") or []
         if children:
-            # ¿Algún hijo NO está Operational?
             any_non_oper = any(not OPERATIONAL_RE.search((c.get("status") or "")) for c in children)
             if any_non_oper:
-                # Muestra el título del grupo y luego los hijos con su estado
                 lines.append(f"{g['name']}")
                 for c in children:
                     cname = c["name"]
                     cstatus = c.get("status") or "Unknown"
                     lines.append(f"{cname} {cstatus}")
             else:
-                # Todos los hijos Operational → una sola línea
                 lines.append(f"{g['name']} Operational")
         else:
-            # Grupo sin hijos
             status = g.get("status") or "Unknown"
             lines.append(f"{g['name']} {status}")
 
@@ -171,7 +192,111 @@ def format_message(groups, today_inc):
 
     return "\n".join(lines)
 
-# -------- Runner --------
+# -------- NUEVO: collect() para export JSON (sin notificar) --------
+
+def _to_component_lines_from_groups(groups):
+    """
+    Reutiliza tu lógica compacta para producir component_lines normalizados.
+    """
+    component_lines = []
+    for g in groups or []:
+        children = g.get("children") or []
+        if children:
+            any_non_oper = any(not OPERATIONAL_RE.search((c.get("status") or "")) for c in children)
+            if any_non_oper:
+                component_lines.append(f"{g['name']}")
+                for c in children:
+                    cname = c["name"]
+                    cstatus = c.get("status") or "Unknown"
+                    component_lines.append(f"- {cname} {cstatus}")
+            else:
+                component_lines.append(f"{g['name']} Operational")
+        else:
+            status = g.get("status") or "Unknown"
+            component_lines.append(f"{g['name']} {status}")
+    # compacta duplicados
+    seen, out = set(), []
+    for ln in component_lines:
+        if ln not in seen:
+            seen.add(ln); out.append(ln)
+    return out
+
+def _to_incidents_lines_from_today(today_inc):
+    items = today_inc.get("items") or []
+    if not items or today_inc.get("count", 0) == 0:
+        return ["No incidents reported today."]
+    # normaliza a bullets
+    out = []
+    for it in items:
+        s = str(it).strip()
+        out.append(s if s.startswith("- ") else f"- {s}")
+    return out
+
+def collect(driver):
+    """
+    1) Intenta tu parseo DOM (Selenium+BS) y devuelve dict normalizado.
+    2) Si falla o queda vacío, usa fallback a Statuspage API (si disponible).
+    """
+    try:
+        # --- Tu flujo DOM original, sin notificar ---
+        try:
+            driver.set_page_load_timeout(45)
+        except Exception:
+            pass
+
+        try:
+            driver.get(URL)
+        except TimeoutException:
+            try:
+                driver.execute_script("window.stop();")
+            except Exception:
+                pass
+
+        try:
+            wait_for_page(driver)
+        except Exception:
+            pass
+
+        soup = BeautifulSoup(driver.page_source, "lxml")
+        groups = parse_component_groups(soup)
+        today_inc = parse_incidents_today(soup)
+
+        component_lines = _to_component_lines_from_groups(groups)
+        incidents_lines = _to_incidents_lines_from_today(today_inc)
+
+        overall_ok = (
+            all("Operational" in ln for ln in component_lines) and
+            incidents_lines == ["No incidents reported today."]
+        )
+
+        # Si conseguimos algo con sentido, devolvemos
+        if component_lines or incidents_lines != ["No incidents reported today."]:
+            return {
+                "name": "Akamai (Guardicore)",
+                "timestamp_utc": _now_utc_clean(),  # sin " UTC"; el digest lo añade
+                "component_lines": component_lines,
+                "incidents_lines": incidents_lines,
+                "overall_ok": overall_ok,
+            }
+
+    except Exception:
+        # seguimos al fallback
+        pass
+
+    # --- Fallback a Statuspage si está disponible ---
+    if _HAS_STATUSPAGE:
+        return build_statuspage_result("Akamai (Guardicore)", URL.rstrip("/"))
+
+    # Último recurso: sin datos
+    return {
+        "name": "Akamai (Guardicore)",
+        "timestamp_utc": _now_utc_clean(),
+        "component_lines": [],
+        "incidents_lines": ["No incidents reported today."],
+        "overall_ok": None,
+    }
+
+# -------- Runner legacy (se mantiene) --------
 
 def run():
     driver = start_driver()
@@ -213,6 +338,7 @@ def run():
         print(msg)
         print("================================\n")
 
+        # Notificaciones legacy (tu camino anterior)
         send_telegram(msg)
         send_teams(msg)
 
