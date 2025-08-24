@@ -10,7 +10,7 @@ Construye el JSON de datos para las plantillas DORA (txt y html).
   * Contadores (aprox.) de incidencias del día y mantenimientos
   * Fuentes en dos variantes:
       - LISTA_FUENTES_CON_ENLACES (HTML <li><a ...>)
-      - LISTA_FUENTES_TXT (viñetas planas para texto)
+      - LISTA_FUENTES_TXT (para texto: ahora como URLs simples)
 - Escribe el JSON listo para que run_digest.py haga el render.
 
 NOTA: Este script NO envía nada; solo prepara datos.
@@ -41,9 +41,10 @@ SOURCES = [
 ]
 
 def build_sources_blocks() -> Tuple[str, str]:
-    """Devuelve (html_ul_items, txt_bullets)"""
+    """Devuelve (html_ul_items, txt_lines). TXT ahora muestra URLs simples."""
     html = "".join(f'<li><a href="{url}">{label}</a></li>\n' for label, url in SOURCES)
-    txt  = "\n".join(f"- {label}" for label, _ in SOURCES)
+    # TXT con URLs (como lo quieres ver):
+    txt  = "\n".join(f"- {url}" for _, url in SOURCES)
     return html, txt
 
 # ---------------------------------------------------------------------------
@@ -92,7 +93,7 @@ def _fmt_timestamp(ts: str) -> str:
     m = re.match(r"^\s*(\d{4}-\d{2}-\d{2}\s+\d{2}:\d{2})", s)
     if m:
         return m.group(1)
-    # último recurso: si ya viene "YYYY-MM-DD HH:MM UTC", déjalo tal cual
+    # último recurso
     return s
 
 def _title_for_vendor(name: str) -> str:
@@ -142,12 +143,10 @@ def build_vendor_block(v: Dict[str, Any]) -> str:
     out.append("")
 
     # Component status
-    # Si el vendor ya formatea su propio encabezado (p.ej. "Component status"), no reinsertar.
     has_comp_header = any(re.search(r"^\s*Component status\s*$", ln, re.I) for ln in comp_lines)
     if not has_comp_header:
         out.append("Component status")
     if comp_lines:
-        # Normalizar viñetas
         for ln in comp_lines:
             ln = ln.strip()
             if not ln:
@@ -157,17 +156,14 @@ def build_vendor_block(v: Dict[str, Any]) -> str:
             else:
                 out.append(f"- {ln}")
     else:
-        # Sin componentes: si overall_ok decimos "All components Operational", si no, "(no data)"
         out.append("- All components Operational" if overall_ok else "- (no data)")
 
     # Incidents today
     out.append("")
-    # Evitar duplicar el encabezado si ya viene incluido
     has_inc_header = any(re.search(r"^\s*Incidents today\s*$", ln, re.I) for ln in inc_lines)
     if not has_inc_header:
         out.append("Incidents today")
     if inc_lines:
-        # Si las líneas incluyen párrafos con encabezados propios (Trend Micro), respétalos.
         empty_acc = True
         for ln in inc_lines:
             ln = ln.rstrip()
@@ -200,13 +196,11 @@ def compute_counters(vendors: List[Dict[str, Any]]) -> Dict[str, int]:
     mant = 0
 
     for v in vendors:
-        # incidents
         for ln in _safe_lines(v.get("incidents_lines")):
             if STATUS_RESOLVED_RE.search(ln):
                 resueltos += 1
             elif STATUS_ANY_TODAY_RE.search(ln):
                 nuevos += 1
-        # components
         for ln in _safe_lines(v.get("component_lines")):
             if UNDER_MAINT_RE.search(ln):
                 mant += 1
@@ -236,7 +230,6 @@ def build_obs_clave(vendors: List[Dict[str, Any]]) -> str:
     return "Actividad detectada en una o más plataformas. Revisar detalles por fabricante."
 
 def next_report_date_utc_str() -> str:
-    # Siguiente día (ISO corto)
     dt = datetime.now(timezone.utc) + timedelta(days=1)
     return dt.strftime("%Y-%m-%d")
 
@@ -257,7 +250,6 @@ def main():
         data = _read_json(p)
         if not data:
             continue
-        # Normalizar claves esperadas
         v = {
             "name": data.get("name") or os.path.splitext(os.path.basename(p))[0],
             "timestamp_utc": data.get("timestamp_utc") or "",
@@ -299,12 +291,12 @@ def main():
         "MANTENIMIENTOS_HOY": counts["MANTENIMIENTOS_HOY"],
         # Recomendaciones / cumplimiento
         "OBS_CLAVE": obs_clave,
-        "IMPACTO_CLIENTE_SI_NO": "",         # lo decides tú si quieres sobrescribir en el workflow
-        "ACCION_SUGERIDA": "",               # idem
+        "IMPACTO_CLIENTE_SI_NO": "",
+        "ACCION_SUGERIDA": "",
         "FECHA_SIGUIENTE_REPORTE": next_report_date_utc_str(),
-        # Fuentes (HTML para correo HTML; TXT para correo de texto / Telegram)
-        "LISTA_FUENTES_CON_ENLACES": html_src,
-        "LISTA_FUENTES_TXT": txt_src,
+        # Fuentes
+        "LISTA_FUENTES_CON_ENLACES": html_src,  # para HTML
+        "LISTA_FUENTES_TXT": txt_src,           # para TXT (URLs)
         # Compat: si las plantillas todavía tuvieran estas tablas, vaciarlas
         "TABLA_INCIDENTES_HOY": "",
         "TABLA_INCIDENTES_15D": "",
