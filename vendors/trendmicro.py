@@ -1,4 +1,18 @@
 # vendors/trendmicro.py
+# -*- coding: utf-8 -*-
+"""
+Trend Micro — soporte dual:
+- run(): ejecución con Selenium + notificación combinada (Telegram/Teams)
+- collect(driver): export JSON normalizado para el digest
+
+Reglas:
+- Se leen los arrays `sspDataInfo` embebidos en <script>.
+- Se filtra por producto (Cloud One / Vision One).
+- Se agrupa por incidente y se toma la última actualización de HOY (UTC).
+- Mensajes en texto plano (sin HTML).
+- Si no hay incidentes de hoy, se muestra el literal de la página “No incidents reported today.”
+"""
+
 import os
 import re
 import time
@@ -7,6 +21,7 @@ import json
 import traceback
 from datetime import datetime, timezone
 from urllib.parse import unquote
+from typing import List, Dict, Any, Tuple, Optional
 
 from bs4 import BeautifulSoup
 from dateutil import parser as dtparser
@@ -44,29 +59,43 @@ STATUS_MAP = {
     770060005: "Mitigated",
 }
 
-def now_utc_str():
+# ---------------- Utilidades ---------------- #
+
+def now_utc_str() -> str:
     return datetime.utcnow().strftime("%Y-%m-%d %H:%M UTC")
+
+def _now_utc_clean() -> str:
+    """Para export JSON (sin sufijo 'UTC'; lo añade el renderer)."""
+    return datetime.now(timezone.utc).strftime("%Y-%m-%d %H:%M")
 
 def collapse_ws(s: str) -> str:
     return re.sub(r"\s+", " ", s or "").strip()
 
-def wait_for_page(driver):
+def wait_for_page(driver) -> None:
+    """
+    Considera la página lista cuando hay body y:
+    - aparece 'past incidents' o el literal de no-incidentes, o
+    - encontramos 'sspDataInfo' en el HTML (la fuente real de datos).
+    """
     WebDriverWait(driver, 25).until(EC.presence_of_element_located((By.TAG_NAME, "body")))
     for _ in range(60):
-        body = driver.find_element(By.TAG_NAME, "body").text
+        try:
+            body = driver.find_element(By.TAG_NAME, "body").text
+        except Exception:
+            body = ""
         text = collapse_ws(body)
-        if ("past incidents" in text.lower()) or NO_INCIDENTS_TODAY_RE.search(text) or "sspDataInfo" in driver.page_source:
+        if ("past incidents" in text.lower()) or NO_INCIDENTS_TODAY_RE.search(text) or ("sspDataInfo" in driver.page_source):
             return
-        time.sleep(0.3)
+        time.sleep(0.25)
 
-# ---------- Helpers para "no incidents" textual ----------
 def extract_no_incidents_text(soup: BeautifulSoup) -> str:
     full = collapse_ws(soup.get_text(" ", strip=True))
     m = NO_INCIDENTS_TODAY_RE.search(full)
     return m.group(0) if m else "No incidents reported today."
 
 # ---------- Extraer arrays sspDataInfo de <script> ----------
-def _extract_json_array_from_key(script_text: str, key: str):
+
+def _extract_json_array_from_key(script_text: str, key: str) -> Optional[str]:
     m = re.search(rf"{re.escape(key)}\s*[:=]\s*(\[)", script_text)
     if not m:
         return None
@@ -84,8 +113,8 @@ def _extract_json_array_from_key(script_text: str, key: str):
         i += 1
     return None
 
-def find_ssp_data_info_arrays(html: str):
-    out = []
+def find_ssp_data_info_arrays(html: str) -> List[str]:
+    out: List[str] = []
     soup = BeautifulSoup(html, "lxml")
     for sc in soup.find_all("script"):
         txt = sc.string or sc.get_text() or ""
@@ -96,24 +125,25 @@ def find_ssp_data_info_arrays(html: str):
                 out.append(arr_txt)
     return out
 
-def parse_ssp_records_for_product(html: str, product_name: str):
+def parse_ssp_records_for_product(html: str, product_name: str) -> List[Dict[str, Any]]:
     """
     Devuelve lista de dicts SOLO del producto indicado:
     { id, status(int), status_text, subject, otherImpact, hisDate(UTC), productEnName }
     """
     arrays = find_ssp_data_info_arrays(html)
-    records = []
+    records: List[Dict[str, Any]] = []
     for arr_txt in arrays:
         data = None
         try:
             data = json.loads(arr_txt)
         except Exception:
+            # tolerancia a JSON "imperfecto"
             try:
                 cleaned = re.sub(r",\s*}", "}", arr_txt)
                 cleaned = re.sub(r",\s*]", "]", cleaned)
                 data = json.loads(cleaned)
             except Exception:
-                continue  # ignora arrays ilegibles
+                continue
 
         for item in data:
             prod = str(item.get("productEnName") or "").strip()
@@ -159,11 +189,12 @@ def parse_ssp_records_for_product(html: str, product_name: str):
     return records
 
 # ---------- Solo HOY ----------
+
 def is_today_utc(dtobj: datetime) -> bool:
     now = datetime.utcnow()
     return (dtobj.year, dtobj.month, dtobj.day) == (now.year, now.month, now.day)
 
-def summarize_today(records):
+def summarize_today(records: List[Dict[str, Any]]) -> Dict[str, Any]:
     """
     Agrupa por 'id' y toma la última actualización de HOY para cada incidente.
     Devuelve: { "count": N, "items": ["• Resolved — Title (HH:MM UTC)", ...] }
@@ -172,11 +203,11 @@ def summarize_today(records):
     if not today_updates:
         return {"count": 0, "items": []}
 
-    by_id = {}
+    by_id: Dict[str, List[Dict[str, Any]]] = {}
     for r in today_updates:
         by_id.setdefault(r["id"], []).append(r)
 
-    lines = []
+    lines: List[str] = []
     for inc_id, items in by_id.items():
         items.sort(key=lambda x: x["hisDate"], reverse=True)
         last = items[0]
@@ -185,57 +216,93 @@ def summarize_today(records):
         status_word = last["status_text"]
         lines.append(f"• {status_word} — {title} ({hhmm})")
 
+    # Orden descendente lexicográfica (hora incluida en el string)
     lines.sort(reverse=True)
     return {"count": len(lines), "items": lines}
 
-# ---------- Runner (una sola notificación combinada) ----------
+# ---------- Formateo de sección por producto ----------
+
+def build_section_lines(name: str, html: str, product: str) -> Tuple[List[str], int]:
+    records = parse_ssp_records_for_product(html, product)
+    today = summarize_today(records)
+
+    lines = [f"[{name}]"]
+    if today["count"] > 0:
+        lines.append(f"Incidents today — {today['count']} incident(s)")
+        lines.extend(today["items"])
+    else:
+        soup = BeautifulSoup(html, "lxml")
+        no_msg = extract_no_incidents_text(soup)
+        lines.append("Incidents today")
+        lines.append(f"- {no_msg}")
+
+    return lines, int(today["count"])
+
+# ---------- Export normalizado para digest ----------
+
+def collect(driver) -> Dict[str, Any]:
+    """
+    Devuelve un dict normalizado para el digest:
+      {
+        "name": "Trend Micro",
+        "timestamp_utc": "YYYY-MM-DD HH:MM",
+        "component_lines": [],
+        "incidents_lines": [ "<bloque Cloud One>", "<bloque Vision One>" ],
+        "overall_ok": True/False
+      }
+    """
+    sections: List[str] = []
+    total_today = 0
+
+    for site in SITES:
+        driver.get(site["url"])
+        wait_for_page(driver)
+        html = driver.page_source
+
+        if SAVE_HTML:
+            try:
+                with open(f"trend_{site['slug']}_page_source.html", "w", encoding="utf-8") as f:
+                    f.write(html)
+            except Exception:
+                pass
+
+        lines, cnt = build_section_lines(site["name"], html, site["product"])
+        sections.append("\n".join(lines))
+        total_today += cnt
+
+    return {
+        "name": "Trend Micro",
+        "timestamp_utc": _now_utc_clean(),
+        "component_lines": [],            # Trend no expone “componentes” en estas páginas
+        "incidents_lines": sections,      # cada bloque como párrafo independiente
+        "overall_ok": (total_today == 0),
+    }
+
+# ---------- Runner (notificación combinada) ----------
+
 def run():
     driver = start_driver()
     try:
-        sections = []
-
+        sections: List[str] = []
         for site in SITES:
-            name = site["name"]
-            url = site["url"]
-            slug = site["slug"]
-            product = site["product"]
-
-            driver.get(url)
+            driver.get(site["url"])
             wait_for_page(driver)
-
             html = driver.page_source
             if SAVE_HTML:
                 try:
-                    fname = f"trend_{slug}_page_source.html"
-                    with open(fname, "w", encoding="utf-8") as f:
+                    with open(f"trend_{site['slug']}_page_source.html", "w", encoding="utf-8") as f:
                         f.write(html)
-                    print(f"💾 HTML saved to {fname}")
-                except Exception as e:
-                    print(f"Could not save HTML for {name}: {e}")
-
-            records = parse_ssp_records_for_product(html, product)
-            today = summarize_today(records)
-
-            # Sección por consola (siempre)
-            lines = [f"[{name}]"]
-            if today["count"] > 0:
-                lines.append(f"Incidents today — {today['count']} incident(s)")
-                lines.extend(today["items"])
-            else:
-                soup = BeautifulSoup(html, "lxml")
-                no_msg = extract_no_incidents_text(soup)
-                lines.append("Incidents today")
-                lines.append(f"- {no_msg}")
-
+                except Exception:
+                    pass
+            lines, _ = build_section_lines(site["name"], html, site["product"])
             sections.append("\n".join(lines))
 
-        # ÚNICO mensaje para ambas consolas
         msg_lines = [
             "Trend Micro - Status",
             now_utc_str(),
-            ""
+            "",
+            "\n\n".join(sections)
         ]
-        msg_lines.append("\n\n".join(sections))
         msg = "\n".join(msg_lines)
 
         print("\n===== TREND MICRO (COMBINED) =====")
