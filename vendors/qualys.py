@@ -1,9 +1,22 @@
 # vendors/qualys.py
+# -*- coding: utf-8 -*-
+"""
+Qualys — History:
+- Página: https://status.qualys.com/history?filter=8f7fjwhmd4n0
+- Muestra incidencias históricas por meses.
+- Reglas:
+  * Ignorar entradas [Scheduled] / scheduled maintenance.
+  * Convertir horas a UTC.
+  * Salida de texto plano (sin HTML).
+  * Proveer collect(driver) para el digest.
+"""
+
 import os
 import re
 import time
 import traceback
 from datetime import datetime, timezone, timedelta
+from typing import List, Dict, Any, Tuple, Optional
 
 from bs4 import BeautifulSoup
 from selenium.webdriver.common.by import By
@@ -12,7 +25,6 @@ from selenium.webdriver.support import expected_conditions as EC
 
 from common.browser import start_driver
 from common.notify import send_telegram, send_teams
-from common.format import header
 
 URL = "https://status.qualys.com/history?filter=8f7fjwhmd4n0"
 SAVE_HTML = os.getenv("SAVE_HTML", "0") == "1"
@@ -21,10 +33,8 @@ SAVE_HTML = os.getenv("SAVE_HTML", "0") == "1"
 MONTHS_SHORT = "Jan|Feb|Mar|Apr|May|Jun|Jul|Aug|Sep|Oct|Nov|Dec"
 MONTHS_FULL = "January|February|March|April|May|June|July|August|September|October|November|December"
 
-# Rango horario laxo: permite espacios extra, coma opcional, guion o en-dash, y TZ de 2-4 letras
-# Ejemplos que empareja:
-#  "Jun 13, 09:18 - Jun 14, 11:18 PDT"
-#  "Jun 2, 05:19 - 05:44 PDT"
+# Rangos horarios (laxos) tipo:
+# "Jun 13, 09:18 - Jun 14, 11:18 PDT"  o  "Jun 2, 05:19 - 05:44 PDT"
 DATE_RANGE_RE = re.compile(
     rf"\b({MONTHS_SHORT})\s+\d{{1,2}}\s*,\s*\d{{1,2}}:\d{{2}}\s*[-–]\s*(?:({MONTHS_SHORT})\s+\d{{1,2}}\s*,\s*)?\d{{1,2}}:\d{{2}}\s*(UTC|GMT|[A-Z]{{2,4}})\b",
     re.I,
@@ -32,7 +42,7 @@ DATE_RANGE_RE = re.compile(
 # Encabezado de mes: "June 2025"
 MONTH_HEADER_RE = re.compile(rf"\b({MONTHS_FULL})\s+(\d{{4}})\b", re.I)
 
-# Mapa de abreviaturas de zona a desplazamiento en minutos
+# Mapa TZ abreviado → offset en minutos
 TZ_OFFSETS_MIN = {
     "UTC": 0, "GMT": 0,
     "PDT": -7*60, "PST": -8*60,
@@ -41,22 +51,28 @@ TZ_OFFSETS_MIN = {
     "MDT": -6*60, "MST": -7*60,
     "CEST": 120, "CET": 60,
     "BST": 60,
-    # añade otras si Qualys las usa
 }
 
-# ------------------ Utilidades ------------------
-
-def wait_for_page(driver):
-    # Espera a que haya enlaces y que en el body aparezca alguna línea de fecha (tras render dinámico)
-    WebDriverWait(driver, 20).until(EC.presence_of_element_located((By.CSS_SELECTOR, "a[href]")))
-    for _ in range(30):
-        body_text = driver.find_element(By.TAG_NAME, "body").text
-        if DATE_RANGE_RE.search(_collapse_ws(body_text)):
-            return
-        time.sleep(0.5)
+# ------------------ Utilidades básicas ------------------
 
 def _collapse_ws(s: str) -> str:
     return re.sub(r"\s+", " ", s or "").strip()
+
+def now_utc_str() -> str:
+    return datetime.utcnow().strftime("%Y-%m-%d %H:%M UTC")
+
+def _now_utc_clean() -> str:
+    """Para export JSON: sin el sufijo 'UTC'; el renderer lo añadirá si procede."""
+    return datetime.now(timezone.utc).strftime("%Y-%m-%d %H:%M")
+
+def wait_for_page(driver):
+    # Espera a que haya enlaces y que aparezca algún rango horario en el body (render dinámico)
+    WebDriverWait(driver, 25).until(EC.presence_of_element_located((By.CSS_SELECTOR, "a[href]")))
+    for _ in range(40):
+        body_text = driver.find_element(By.TAG_NAME, "body").text
+        if DATE_RANGE_RE.search(_collapse_ws(body_text)):
+            return
+        time.sleep(0.4)
 
 def _norm_node_text(node) -> str:
     try:
@@ -64,10 +80,10 @@ def _norm_node_text(node) -> str:
     except Exception:
         return ""
 
-def _find_year_context(node) -> int | None:
+def _find_year_context(node) -> Optional[int]:
     """Busca hacia atrás el encabezado 'June 2025' más cercano para obtener el año."""
     from bs4.element import NavigableString
-    # Recorre hacia atrás en el flujo
+    # Hacia atrás en el flujo
     for prev in node.previous_elements:
         txt = _collapse_ws(prev if isinstance(prev, str) else getattr(prev, "get_text", lambda *a,**k: "")(" ", strip=True))
         m = MONTH_HEADER_RE.search(txt or "")
@@ -76,7 +92,7 @@ def _find_year_context(node) -> int | None:
                 return int(m.group(2))
             except Exception:
                 pass
-    # Fallback subiendo ancestros
+    # Ancestros
     anc = node
     for _ in range(8):
         if not anc:
@@ -91,8 +107,8 @@ def _find_year_context(node) -> int | None:
         anc = getattr(anc, "parent", None)
     return None
 
-def _parse_with_tz_abbrev(s_no_tz: str, tzabbr: str):
-    """Convierte 'Jun 13, 2025 09:18' con tz 'PDT' a UTC usando mapa de abreviaturas."""
+def _parse_with_tz_abbrev(s_no_tz: str, tzabbr: str) -> Optional[datetime]:
+    """Convierte 'Jun 13, 2025 09:18' con tz 'PDT' a UTC usando el mapa."""
     try:
         dt = datetime.strptime(s_no_tz, "%b %d, %Y %H:%M")
     except Exception:
@@ -103,7 +119,7 @@ def _parse_with_tz_abbrev(s_no_tz: str, tzabbr: str):
     tzinfo = timezone(timedelta(minutes=offset))
     return dt.replace(tzinfo=tzinfo).astimezone(timezone.utc)
 
-def _build_dt_strings(part: str, year: int) -> str | None:
+def _build_dt_strings(part: str, year: int) -> Optional[str]:
     """
     Normaliza 'Jun 13 , 09:18' -> 'Jun 13, 2025 09:18' (sin TZ).
     """
@@ -118,14 +134,14 @@ def _build_dt_strings(part: str, year: int) -> str | None:
 def _parse_date_range(date_text: str, context_node):
     """
     'Jun 13 , 09:18 - Jun 14 , 11:18 PDT' -> (start_utc, end_utc)
-    Usa el año del encabezado más cercano.
+    Usa el año del encabezado más cercano; si no, año UTC actual.
     """
     date_text = _collapse_ws(date_text)
     m = DATE_RANGE_RE.search(date_text or "")
     if not m:
         return None, None
     tzabbr = m.group(3)
-    # divide por '-' o '–'
+    # Divide por '-' o '–'
     parts = re.split(r"\s*[-–]\s*", m.group(0))
     left = (parts[0] or "").strip().rstrip(",")
     right = (parts[1] or "").strip()
@@ -158,8 +174,8 @@ def _status_from_text(text: str) -> str:
 
 # ------------------ Extracción ------------------
 
-def _extract_items(soup: BeautifulSoup):
-    items = []
+def _extract_items(soup: BeautifulSoup) -> List[Dict[str, Any]]:
+    items: List[Dict[str, Any]] = []
 
     # 1) Candidatos: <div> cuyo texto NORMALIZADO contenga EXACTAMENTE un rango horario
     candidates = []
@@ -224,7 +240,7 @@ def _extract_items(soup: BeautifulSoup):
             title = _collapse_ws(acc[0])
             url = None
 
-        # Fechas
+        # Fechas (UTC)
         started_at, ended_at = _parse_date_range(date_str, div)
 
         items.append({
@@ -244,27 +260,80 @@ def _extract_items(soup: BeautifulSoup):
         )
     return sorted(items, key=sort_key, reverse=True)
 
-# ------------------ Formato mensaje ------------------
+# ------------------ Formateo (texto plano) ------------------
 
-def format_message(items):
-    lines = [header("Qualys"), "\n<b>Histórico (meses visibles en la página)</b>"]
+def _fmt_item_lines(idx: int, inc: Dict[str, Any]) -> List[str]:
+    t = inc.get("title") or "Sin título"
+    u = inc.get("url")
+    st = inc.get("status") or "Update"
+    sdt = inc.get("started_at")
+    edt = inc.get("ended_at")
+    s_s = sdt.strftime("%Y-%m-%d %H:%M UTC") if sdt else "N/D"
+    e_s = edt.strftime("%Y-%m-%d %H:%M UTC") if edt else "N/D"
+    title_line = f"{idx}. {t}" if not u else f"{idx}. {t} ({u})"
+    detail_line = f"   Estado: {st} · Inicio: {s_s} · Fin: {e_s}"
+    return [title_line, detail_line]
+
+def format_message(items: List[Dict[str, Any]]) -> str:
+    lines: List[str] = [
+        "Qualys - Estado de Incidentes",
+        now_utc_str(),
+        "",
+        "Histórico (meses visibles en la página)"
+    ]
     if not items:
-        lines.append("\n- No hay incidencias no programadas en los meses mostrados.")
-        return "\n".join(lines)
-    for idx, inc in enumerate(items, 1):
-        t = inc.get("title") or "Sin título"
-        u = inc.get("url")
-        st = inc.get("status") or "Update"
-        sdt = inc.get("started_at")
-        edt = inc.get("ended_at")
-        s_s = sdt.strftime("%Y-%m-%d %H:%M UTC") if sdt else "N/D"
-        e_s = edt.strftime("%Y-%m-%d %H:%M UTC") if edt else "N/D"
-        title_line = f"{idx}. {t}" if not u else f'{idx}. <a href="{u}">{t}</a>'
-        lines.append(title_line)
-        lines.append(f"   Estado: {st} · Inicio: {s_s} · Fin: {e_s}")
+        lines.append("- No hay incidencias no programadas en los meses mostrados.")
+    else:
+        for idx, inc in enumerate(items, 1):
+            lines.extend(_fmt_item_lines(idx, inc))
     return "\n".join(lines)
 
-# ------------------ Runner ------------------
+# ------------------ Export normalizado (digest) ------------------
+
+def _format_incidents_lines_for_digest(items: List[Dict[str, Any]]) -> List[str]:
+    lines: List[str] = ["Histórico (meses visibles en la página)"]
+    if not items:
+        lines.append("- No hay incidencias no programadas en los meses mostrados.")
+        return lines
+    for idx, inc in enumerate(items, 1):
+        lines.extend(_fmt_item_lines(idx, inc))
+    return lines
+
+def collect(driver) -> Dict[str, Any]:
+    """
+    Devuelve un dict normalizado para el digest:
+      {
+        "name": "Qualys",
+        "timestamp_utc": "YYYY-MM-DD HH:MM",
+        "component_lines": [],
+        "incidents_lines": [...],
+        "overall_ok": True/False
+      }
+    """
+    driver.get(URL)
+    wait_for_page(driver)
+    time.sleep(0.4)
+
+    html = driver.page_source
+    if SAVE_HTML:
+        try:
+            with open("qualys_page_source.html", "w", encoding="utf-8") as f:
+                f.write(html)
+        except Exception:
+            pass
+
+    soup = BeautifulSoup(html, "lxml")
+    items = _extract_items(soup)
+
+    return {
+        "name": "Qualys",
+        "timestamp_utc": _now_utc_clean(),
+        "component_lines": [],                    # Qualys no expone "componentes" aquí
+        "incidents_lines": _format_incidents_lines_for_digest(items),
+        "overall_ok": len(items) == 0,            # si hay items no programados, overall_ok = False
+    }
+
+# ------------------ Runner clásico (notificación) ------------------
 
 def run():
     driver = start_driver()
@@ -295,8 +364,8 @@ def run():
     except Exception as e:
         print(f"[qualys] ERROR: {e}")
         traceback.print_exc()
-        send_telegram(f"<b>Qualys - Monitor</b>\nSe produjo un error:\n<pre>{str(e)}</pre>")
-        send_teams(f"❌ Qualys - Monitor\nSe produjo un error: {str(e)}")
+        send_telegram(f"Qualys - Monitor\nError:\n{str(e)}")
+        send_teams(f"❌ Qualys - Monitor\nError: {str(e)}")
         raise
     finally:
         try:
