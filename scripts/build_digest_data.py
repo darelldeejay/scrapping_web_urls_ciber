@@ -10,10 +10,10 @@ Construye el JSON de datos para las plantillas DORA (txt y html).
   * Contadores (aprox.) de incidencias del día y mantenimientos
   * Fuentes en dos variantes:
       - LISTA_FUENTES_CON_ENLACES (HTML <li><a ...>)
-      - LISTA_FUENTES_TXT (para texto: ahora como URLs simples)
-- Escribe el JSON listo para que run_digest.py haga el render.
+      - LISTA_FUENTES_TXT (TXT con URLs, como quieres)
+  * Recomendaciones operativas (heurística autocontenida)
 
-NOTA: Este script NO envía nada; solo prepara datos.
+Este script NO envía nada; solo prepara datos para run_digest.py.
 """
 
 import os
@@ -41,9 +41,8 @@ SOURCES = [
 ]
 
 def build_sources_blocks() -> Tuple[str, str]:
-    """Devuelve (html_ul_items, txt_lines). TXT ahora muestra URLs simples."""
+    """Devuelve (html_ul_items, txt_lines). TXT muestra URLs simples (como pediste)."""
     html = "".join(f'<li><a href="{url}">{label}</a></li>\n' for label, url in SOURCES)
-    # TXT con URLs (como lo quieres ver):
     txt  = "\n".join(f"- {url}" for _, url in SOURCES)
     return html, txt
 
@@ -53,7 +52,8 @@ def build_sources_blocks() -> Tuple[str, str]:
 
 STATUS_RESOLVED_RE = re.compile(r"\bResolved\b", re.I)
 STATUS_ANY_TODAY_RE = re.compile(
-    r"\b(Investigating|Identified|Update|Mitigated|Monitoring|Degraded|Incident)\b", re.I
+    r"\b(Investigating|Identified|Update|Mitigated|Monitoring|Degraded|Incident|Partial Outage|Major Outage)\b",
+    re.I,
 )
 UNDER_MAINT_RE = re.compile(r"\bUnder Maintenance\b", re.I)
 
@@ -71,7 +71,6 @@ def _safe_lines(x) -> List[str]:
     if x is None:
         return []
     if isinstance(x, list):
-        # aplanar por si vienen párrafos con \n
         out: List[str] = []
         for it in x:
             if isinstance(it, str):
@@ -82,50 +81,43 @@ def _safe_lines(x) -> List[str]:
     return []
 
 def _fmt_timestamp(ts: str) -> str:
-    """Adapta 'YYYY-MM-DD HH:MM' o ISO a 'YYYY-MM-DD HH:MM' (UTC explícito lo añade el render)."""
+    """Adapta 'YYYY-MM-DD HH:MM' o ISO a 'YYYY-MM-DD HH:MM'."""
     if not ts:
         return ""
-    s = ts.strip()
-    # ISO → 'YYYY-MM-DD HH:MM'
-    s = s.replace("T", " ")
-    s = s.replace("Z", "")
-    # recorta a minutos
+    s = ts.strip().replace("T", " ").replace("Z", "")
     m = re.match(r"^\s*(\d{4}-\d{2}-\d{2}\s+\d{2}:\d{2})", s)
-    if m:
-        return m.group(1)
-    # último recurso
-    return s
+    return m.group(1) if m else s
 
 def _title_for_vendor(name: str) -> str:
-    """Título visible debajo del '=== VENDOR ==='."""
     n = (name or "").strip()
-    if n.lower().startswith("netskope"):
+    low = n.lower()
+    if low.startswith("netskope"):
         return "Netskope - Estado de Incidentes"
-    if n.lower().startswith("proofpoint"):
+    if low.startswith("proofpoint"):
         return "Proofpoint - Estado de Incidentes"
-    if n.lower().startswith("qualys"):
+    if low.startswith("qualys"):
         return "Qualys - Estado de Incidentes"
-    if n.lower().startswith("imperva"):
+    if low.startswith("imperva"):
         return "Imperva - Status"
-    if n.lower().startswith("akamai") or "guardicore" in n.lower():
+    if low.startswith("akamai") or "guardicore" in low:
         return "Akamai (Guardicore) - Status"
-    if n.lower().startswith("cyberark"):
+    if low.startswith("cyberark"):
         return "CyberArk Privilege Cloud - Status"
-    if n.lower().startswith("aruba"):
+    if low.startswith("aruba"):
         return "Aruba Central - Status"
-    if n.lower().startswith("trend"):
+    if low.startswith("trend"):
         return "Trend Micro - Status"
     return f"{n} - Status"
 
 # ---------------------------------------------------------------------------
-# Construcción de “Detalles por fabricante” (texto plano)
+# “Detalles por fabricante” (texto plano)
 # ---------------------------------------------------------------------------
 
 def build_vendor_block(v: Dict[str, Any]) -> str:
     """
-    Recibe el JSON exportado por el vendor:
+    Espera:
       { name, timestamp_utc, component_lines: [..], incidents_lines: [..], overall_ok: bool }
-    Devuelve un bloque de texto homogéneo sin HTML.
+    Devuelve bloque limpio y homogéneo (sin HTML).
     """
     name = v.get("name") or "Vendor"
     ts   = _fmt_timestamp(v.get("timestamp_utc", ""))
@@ -134,7 +126,6 @@ def build_vendor_block(v: Dict[str, Any]) -> str:
     inc_lines  = _safe_lines(v.get("incidents_lines"))
     overall_ok = bool(v.get("overall_ok"))
 
-    # Cabecera
     out: List[str] = []
     out.append(f"=== {name.upper()} ===")
     out.append(_title_for_vendor(name))
@@ -151,10 +142,7 @@ def build_vendor_block(v: Dict[str, Any]) -> str:
             ln = ln.strip()
             if not ln:
                 continue
-            if ln.startswith(("-", "•")):
-                out.append(ln)
-            else:
-                out.append(f"- {ln}")
+            out.append(ln if ln.startswith(("-", "•")) else f"- {ln}")
     else:
         out.append("- All components Operational" if overall_ok else "- (no data)")
 
@@ -166,10 +154,9 @@ def build_vendor_block(v: Dict[str, Any]) -> str:
     if inc_lines:
         empty_acc = True
         for ln in inc_lines:
-            ln = ln.rstrip()
             if ln.strip():
                 empty_acc = False
-            out.append(ln)
+            out.append(ln.rstrip())
         if empty_acc:
             out.append("- No incidents reported today.")
     else:
@@ -178,23 +165,14 @@ def build_vendor_block(v: Dict[str, Any]) -> str:
     return "\n".join(out).rstrip()
 
 # ---------------------------------------------------------------------------
-# Cómputo simple de contadores (aprox.)
+# Contadores (aprox.) y heurística de recomendaciones
 # ---------------------------------------------------------------------------
 
 def compute_counters(vendors: List[Dict[str, Any]]) -> Dict[str, int]:
-    """
-    Heurística:
-      - RESUELTOS_HOY: líneas que contienen 'Resolved'.
-      - NUEVOS_HOY: líneas que contienen estados típicos (Investigating, Identified, Update,
-                    Mitigated, Monitoring, Degraded, Incident) y NO 'Resolved'.
-      - ACTIVOS: difícil de inferir sin estructura; lo dejamos en 0 (evita confundir).
-      - MANTENIMIENTOS_HOY: líneas de componentes con 'Under Maintenance'.
-    """
     nuevos = 0
     resueltos = 0
-    activos = 0
+    activos = 0  # sin señal fiable, mantener 0
     mant = 0
-
     for v in vendors:
         for ln in _safe_lines(v.get("incidents_lines")):
             if STATUS_RESOLVED_RE.search(ln):
@@ -204,7 +182,6 @@ def compute_counters(vendors: List[Dict[str, Any]]) -> Dict[str, int]:
         for ln in _safe_lines(v.get("component_lines")):
             if UNDER_MAINT_RE.search(ln):
                 mant += 1
-
     return {
         "INC_NUEVOS_HOY": nuevos,
         "INC_ACTIVOS": activos,
@@ -212,22 +189,44 @@ def compute_counters(vendors: List[Dict[str, Any]]) -> Dict[str, int]:
         "MANTENIMIENTOS_HOY": mant,
     }
 
+def build_recommendations(vendors: List[Dict[str, Any]], counts: Dict[str, int]) -> Tuple[str, str]:
+    nuevos = counts.get("INC_NUEVOS_HOY", 0)
+    resueltos = counts.get("INC_RESUELTOS_HOY", 0)
+    mant = counts.get("MANTENIMIENTOS_HOY", 0)
+
+    total_activity = nuevos + resueltos + mant
+    if total_activity == 0:
+        return ("No", "Monitorización habitual (sin acciones adicionales).")
+
+    if mant > 0 and nuevos == 0 and resueltos == 0:
+        return ("No (mantenimiento programado)", "Verificar ventanas y posibles impactos planificados; sin acciones adicionales salvo seguimiento programado.")
+
+    if nuevos > 0:
+        return ("Sí (potencial)", "Comunicación interna breve; monitorización reforzada; revisión de alertas SIEM/observabilidad; seguimiento con el/los fabricante(s) hasta resolución.")
+
+    # Solo resueltos hoy
+    if resueltos > 0 and nuevos == 0:
+        return ("No (incidentes ya resueltos)", "Verificar normalización de servicios y evidencias de resolución; realizar revisión post-incidente si procede.")
+
+    # Fallback defensivo
+    return ("No", "Monitorización habitual.")
+
 # ---------------------------------------------------------------------------
-# OBS_CLAVE y campos auxiliares
+# OBS_CLAVE y auxiliares
 # ---------------------------------------------------------------------------
 
-def build_obs_clave(vendors: List[Dict[str, Any]]) -> str:
-    """
-    Observación breve:
-     - Si todo OK → "Sin novedades relevantes."
-     - Si hay alguna incidencia/mantenimiento → resalta que hay actividad.
-    """
+def build_obs_clave(vendors: List[Dict[str, Any]], counts: Dict[str, int]) -> str:
     any_not_ok = any(not bool(v.get("overall_ok")) for v in vendors)
-    counts = compute_counters(vendors)
     total_activity = counts["INC_NUEVOS_HOY"] + counts["INC_RESUELTOS_HOY"] + counts["MANTENIMIENTOS_HOY"]
     if not any_not_ok and total_activity == 0:
         return "Sin novedades relevantes."
-    return "Actividad detectada en una o más plataformas. Revisar detalles por fabricante."
+    if counts["INC_NUEVOS_HOY"] > 0:
+        return "Incidencias en curso en una o más plataformas. Revisión recomendada."
+    if counts["MANTENIMIENTOS_HOY"] > 0:
+        return "Mantenimientos programados detectados en una o más plataformas."
+    if counts["INC_RESUELTOS_HOY"] > 0:
+        return "Incidentes resueltos hoy; verificar normalización de servicios."
+    return "Actividad detectada; revisar detalle por fabricante."
 
 def next_report_date_utc_str() -> str:
     dt = datetime.now(timezone.utc) + timedelta(days=1)
@@ -259,17 +258,18 @@ def main():
         }
         vendors.append(v)
 
-    # 2) Bloque Detalles por fabricante
+    # 2) Detalles por fabricante (texto)
     vendor_blocks = []
     for v in sorted(vendors, key=lambda x: (x.get("name") or "").lower()):
         vendor_blocks.append(build_vendor_block(v))
     detalles_por_vendor_texto = "\n\n".join(vendor_blocks).strip()
 
-    # 3) Contadores + observación
+    # 3) Contadores + observación + recomendaciones
     counts = compute_counters(vendors)
-    obs_clave = build_obs_clave(vendors)
+    obs_clave = build_obs_clave(vendors, counts)
+    impacto, accion = build_recommendations(vendors, counts)
 
-    # 4) Fuentes (HTML y TXT)
+    # 4) Fuentes
     html_src, txt_src = build_sources_blocks()
 
     # 5) Ventana de observación
@@ -289,18 +289,17 @@ def main():
         "INC_ACTIVOS": counts["INC_ACTIVOS"],
         "INC_RESUELTOS_HOY": counts["INC_RESUELTOS_HOY"],
         "MANTENIMIENTOS_HOY": counts["MANTENIMIENTOS_HOY"],
-        # Recomendaciones / cumplimiento
+        # Observación + Recomendaciones
         "OBS_CLAVE": obs_clave,
-        "IMPACTO_CLIENTE_SI_NO": "",
-        "ACCION_SUGERIDA": "",
+        "IMPACTO_CLIENTE_SI_NO": impacto,
+        "ACCION_SUGERIDA": accion,
         "FECHA_SIGUIENTE_REPORTE": next_report_date_utc_str(),
         # Fuentes
         "LISTA_FUENTES_CON_ENLACES": html_src,  # para HTML
         "LISTA_FUENTES_TXT": txt_src,           # para TXT (URLs)
-        # Compat: si las plantillas todavía tuvieran estas tablas, vaciarlas
+        # Compatibilidad con plantillas antiguas
         "TABLA_INCIDENTES_HOY": "",
         "TABLA_INCIDENTES_15D": "",
-        # Por si tu plantilla TXT añade firma HTML (la dejamos vacía)
         "FIRMA_HTML": "",
     }
 
