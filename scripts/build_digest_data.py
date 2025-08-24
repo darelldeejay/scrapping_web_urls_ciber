@@ -1,416 +1,301 @@
 #!/usr/bin/env python3
 # -*- coding: utf-8 -*-
 
-"""
-Agregador de datos para el digest DORA (robusto frente a formatos heterogéneos).
-- Lee JSON por vendor desde --vendors-dir (archivos *.json).
-- Reconstruye bloques por fabricante con:
-    === VENDOR ===
-    <Título>
-    <timestamp> UTC
-
-    Component status
-    - ...
-    Incidents today
-    - ...
-- Tolera: strings, listas, listas de dicts, dicts con 'items', 'children', 'groups', 'sections', HTML <a>, etc.
-- Preserva URLs como 'Texto (URL)' y limpia etiquetas.
-- Genera:
-    * DETALLES_POR_VENDOR_TEXTO
-    * LISTA_FUENTES_CON_ENLACES (HTML)
-    * FUENTES_TEXTO (plain con URL)
-    * Métricas básicas y OBS_CLAVE
-"""
-
-from __future__ import annotations
-import argparse
-import json
 import os
 import re
-import html
-from datetime import datetime, timezone
-from typing import Dict, List, Tuple, Any
+import json
+import argparse
+from datetime import datetime, timezone, timedelta
+from typing import List, Dict, Any, Tuple
 
-# ========== Utilidades de formato ==========
+try:
+    # Python 3.9+
+    from zoneinfo import ZoneInfo
+    TZ_MADRID = ZoneInfo("Europe/Madrid")
+except Exception:
+    TZ_MADRID = None  # fallback: tratamos como UTC si no existe
 
-TAG_RE = re.compile(r"(?is)<[^>]+>")
-A_HREF_RE = re.compile(r'(?is)<a\b[^>]*\bhref=[\'"]([^\'"]+)[\'"][^>]*>(.*?)</a\s*>')
+# ------------- Utilidades ------------- #
 
-def anchor_to_text(s: str) -> str:
-    def repl(m: re.Match) -> str:
-        url = m.group(1).strip()
-        text = m.group(2).strip()
-        text_clean = TAG_RE.sub("", text)
-        return f"{html.unescape(text_clean)} ({url})"
-    return A_HREF_RE.sub(repl, s)
+def _read_json(path: str) -> Dict[str, Any]:
+    try:
+        with open(path, "r", encoding="utf-8") as f:
+            return json.load(f)
+    except Exception:
+        return {}
 
-def strip_tags(s: str) -> str:
-    if not s:
-        return ""
-    s = anchor_to_text(s)
-    s = TAG_RE.sub("", s)
-    s = html.unescape(s)
-    return re.sub(r"[ \t]+", " ", s).strip()
-
-def dedupe_keep_order(seq: List[str]) -> List[str]:
-    seen = set()
+def _list_vendor_files(vendors_dir: str) -> List[str]:
+    if not os.path.isdir(vendors_dir):
+        return []
     out = []
-    for s in seq:
-        if s in seen:
-            continue
-        seen.add(s)
-        out.append(s)
-    return out
+    for fn in os.listdir(vendors_dir):
+        if fn.lower().endswith(".json"):
+            out.append(os.path.join(vendors_dir, fn))
+    return sorted(out)
 
-def now_utc_str(fmt: str = "%Y-%m-%d %H:%M") -> str:
-    return datetime.now(timezone.utc).strftime(fmt)
+def _as_list(x) -> List[str]:
+    if not x:
+        return []
+    if isinstance(x, list):
+        return [str(i) for i in x if str(i).strip()]
+    return [str(x)]
 
-def today_utc_date() -> str:
+def _norm_ts(ts: str) -> str:
+    """Normaliza timestamps a 'YYYY-MM-DD HH:MM UTC' si vienen en ISO Z o sin sufijo."""
+    if not ts:
+        return ""
+    s = ts.strip()
+    # 2025-08-24T00:10:19Z -> 2025-08-24 00:10 UTC
+    if "T" in s and s.endswith("Z"):
+        s = s.replace("T", " ").replace("Z", "")
+        m = re.match(r"^(\d{4}-\d{2}-\d{2} \d{2}:\d{2})", s)
+        s = m.group(1) if m else s
+        return f"{s} UTC"
+    # Ya viene como 'YYYY-MM-DD HH:MM' => añade UTC si falta
+    if re.match(r"^\d{4}-\d{2}-\d{2}\s+\d{2}:\d{2}$", s) and not s.endswith("UTC"):
+        return f"{s} UTC"
+    return s
+
+def _today_utc_str() -> str:
     return datetime.now(timezone.utc).strftime("%Y-%m-%d")
 
-def coerce_timestamp(ts: Any) -> str:
-    if not ts:
-        return now_utc_str()
-    s = str(ts).strip()
+def _parse_dt_from_line(line: str) -> datetime | None:
+    """Intenta parsear 'YYYY-MM-DD HH:MM UTC' en una línea tipo '   Inicio: ... · Fin: ...'."""
+    m = re.search(r"(\d{4}-\d{2}-\d{2})\s+\d{2}:\d{2}\s+UTC", line or "")
+    if not m:
+        return None
     try:
-        if "T" in s:
-            try:
-                dt = datetime.fromisoformat(s.replace("Z", "+00:00")).astimezone(timezone.utc)
-                return dt.strftime("%Y-%m-%d %H:%M")
-            except Exception:
-                pass
-        for fmt in ("%Y-%m-%d %H:%M", "%Y-%m-%d %H:%M:%S"):
-            try:
-                dt = datetime.strptime(s, fmt).replace(tzinfo=timezone.utc)
-                return dt.strftime("%Y-%m-%d %H:%M")
-            except Exception:
-                continue
+        return datetime.strptime(m.group(0).replace(" UTC",""), "%Y-%m-%d %H:%M").replace(tzinfo=timezone.utc)
     except Exception:
-        pass
-    s = s.replace("T", " ").replace("Z", "")
-    return s[:16]
+        return None
 
-# ========== Fuentes por vendor ==========
+def _greeting_madrid(now_utc: datetime) -> str:
+    if TZ_MADRID:
+        now_mad = now_utc.astimezone(TZ_MADRID)
+    else:
+        now_mad = now_utc  # fallback
+    h = now_mad.hour
+    if 6 <= h < 12:
+        return "Buenos días,"
+    elif 12 <= h < 20:
+        return "Buenas tardes,"
+    else:
+        return "Buenas noches,"
 
-SOURCES: Dict[str, List[Tuple[str, str]]] = {
-    "aruba":      [("Aruba Central — Status", "https://centralstatus.arubanetworking.hpe.com/")],
-    "cyberark":   [("CyberArk Privilege Cloud — Status", "https://privilegecloud-service-status.cyberark.com/")],
-    "guardicore": [("Akamai (Guardicore) — Status", "https://www.akamaistatus.com/")],
-    "imperva":    [("Imperva — Status", "https://status.imperva.com/")],
-    "proofpoint": [("Proofpoint — Current Incidents", "https://proofpoint.my.site.com/community/s/proofpoint-current-incidents")],
-    "qualys":     [("Qualys — Status History", "https://status.qualys.com/history?filter=8f7fjwhmd4n0")],
-    "trendmicro": [
-        ("Trend Micro — Trend Cloud One", "https://status.trendmicro.com/en-US/trend-cloud-one/"),
-        ("Trend Micro — Trend Vision One", "https://status.trendmicro.com/en-US/trend-vision-one/"),
-    ],
-    "netskope":   [("Netskope — Trust Portal", "https://trustportal.netskope.com/")],
-}
+# ------------- Render de vendor (sin duplicaciones) ------------- #
 
-def build_sources_lists(slugs: List[str]) -> Tuple[str, str]:
-    items_html: List[str] = []
-    items_txt: List[str] = []
-    seen = set()
-    for slug in slugs:
-        for name, url in SOURCES.get(slug, []):
-            key = (name, url)
-            if key in seen:
-                continue
-            seen.add(key)
-            items_html.append(f'<li><a href="{url}">{html.escape(name)}</a></li>')
-            items_txt.append(f"- {name}: {url}")
-    return "\n".join(items_html), "\n".join(items_txt)
-
-# ========== Reconstrucción de líneas desde JSON heterogéneo ==========
-
-def split_to_lines(s: str) -> List[str]:
-    return [x.strip() for x in s.splitlines() if x.strip()]
-
-def coerce_to_lines(raw: Any) -> List[str]:
+def render_vendor_block(v: Dict[str, Any]) -> str:
     """
-    Convierte diferentes formas a lista de líneas utilizables:
-      - None -> []
-      - str  -> splitlines(), strip, elimina vacías (conversión <a> previa)
-      - list[str] -> limpia/normaliza
-      - list[dict] con (name,status,items,children) -> "name status" + recursión
-      - dict con 'items' o 'children' -> usa esos campos
+    Render compacto y sin duplicados:
+    - No inyecta 'Component status' si no hay component_lines ni banner.
+    - No inyecta 'Incidents today' automáticamente: usa incidents_lines tal cual.
+    - Si hay 'banner', lo muestra como línea suelta.
     """
-    if raw is None:
-        return []
+    lines: List[str] = []
 
-    if isinstance(raw, dict):
-        # items / children
-        if "items" in raw:
-            return coerce_to_lines(raw.get("items"))
-        if "children" in raw:
-            return coerce_to_lines(raw.get("children"))
+    name = (v.get("name") or v.get("vendor") or "Vendor").strip()
+    lines.append(f"=== {name.upper()} ===")
 
-        nm = raw.get("name")
-        st = raw.get("status")
-        if nm or st:
-            nm = strip_tags(str(nm or ""))
-            st = strip_tags(str(st or ""))
-            return [f"{nm} {st}".strip()]
-        return []
+    title = (v.get("title") or v.get("header") or "").strip()
+    if title:
+        lines.append(title)
 
-    if isinstance(raw, str):
-        s = strip_tags(raw)
-        return split_to_lines(s)
+    ts = (v.get("timestamp_utc") or v.get("timestamp") or v.get("ts") or "").strip()
+    if ts:
+        lines.append(_norm_ts(ts))
 
-    if isinstance(raw, list):
-        out: List[str] = []
-        for el in raw:
-            if isinstance(el, str):
-                out += split_to_lines(strip_tags(el))
-            elif isinstance(el, dict):
-                nm = strip_tags(str(el.get("name") or ""))
-                st = strip_tags(str(el.get("status") or ""))
-                if nm or st:
-                    out.append(f"{nm} {st}".strip())
-                if "items" in el:
-                    out += coerce_to_lines(el["items"])
-                if "children" in el:
-                    out += coerce_to_lines(el["children"])
-                if "text" in el and isinstance(el["text"], str):
-                    out += split_to_lines(strip_tags(el["text"]))
-            else:
-                out += split_to_lines(strip_tags(str(el)))
-        return dedupe_keep_order([x for x in out if x])
-    # fallback
-    s = strip_tags(str(raw))
-    return [s] if s else []
-
-# ========== Reconstrucción de bloques por vendor ==========
-
-NAME_TITLES = {
-    "aruba":      "Aruba Central - Status",
-    "cyberark":   "CyberArk Privilege Cloud - Status",
-    "guardicore": "Akamai (Guardicore) - Status",
-    "imperva":    "Imperva - Status",
-    "netskope":   "Netskope - Estado de Incidentes",
-    "proofpoint": "Proofpoint - Estado de Incidentes",
-    "qualys":     "Qualys - Estado de Incidentes",
-    "trendmicro": "Trend Micro - Status",
-}
-
-def safe_get_timestamp(v: dict) -> str:
-    ts = v.get("timestamp_utc") or v.get("ts_utc") or v.get("export_time_utc") or ""
-    return coerce_timestamp(ts) if ts else now_utc_str()
-
-def best_comp_lines(slug: str, v: dict) -> List[str]:
-    # candidatos típicos
-    for key in ("component_lines", "components", "groups", "component_status", "status_lines"):
-        if key in v and v[key]:
-            return coerce_to_lines(v[key])
-
-    # banner/overall como pista
-    banner = v.get("banner") or v.get("overall_status")
-    if banner:
-        b = strip_tags(str(banner))
-        return [b] if b else []
-
-    # overall_ok -> relleno decente
-    if v.get("overall_ok") is True:
-        # estilos por vendor
-        if slug in ("aruba", "guardicore", "imperva"):
-            return ["All components Operational"]
-        if slug == "netskope":
-            return ["Estado general: Operational"]
-        if slug == "cyberark":
-            return ["System status: All Systems Operational"]
-        return ["All Systems Operational"]
-
-    return []
-
-def best_inc_lines(slug: str, v: dict) -> List[str]:
-    # candidatos habituales
-    for key in ("incidents_lines", "incidents", "sections", "banner", "today", "today_incidents", "incidents_today", "console_lines", "console_text"):
-        if key in v and v[key]:
-            lines = coerce_to_lines(v[key])
-            if lines:
-                return lines
-    return []
-
-def format_vendor_block(slug: str, v: dict) -> str:
-    display_slug = (v.get("name") or slug).upper()
-    title = NAME_TITLES.get(slug, f"{(v.get('name') or slug.title())} - Status")
-    ts = safe_get_timestamp(v)
-
-    comp = best_comp_lines(slug, v)
-    inc  = best_inc_lines(slug, v)
-
-    # Netskope: si hay estructura clásica, mantenemos headings
-    netskope_headings = {
-        "Incidentes activos": ("incidentes activos", "active incidents"),
-        "Últimos 15 días (resueltos)": ("últimos 15 días", "last 15 days", "past incidents"),
-    }
-
-    lines: List[str] = [f"=== {display_slug} ===", title, f"{ts} UTC", ""]
-
-    # CyberArk / Imperva a veces traen banner útil
-    banner = strip_tags(str(v.get("banner") or v.get("overall_status") or "")).strip()
-    if banner:
-        lines.append(banner)
+    if len(lines) > 1:
         lines.append("")
 
-    # Componentes
-    lines.append("Component status")
-    if comp:
-        for s in dedupe_keep_order(comp):
-            lines.append(s if s.startswith("- ") else f"- {s}")
-    else:
-        # si no hay nada pero sabemos que todo ok
-        if v.get("overall_ok") is True:
-            if slug == "cyberark":
-                lines.append("- All Systems Operational")
-            else:
-                lines.append("- All components Operational")
-        else:
-            lines.append("- (no data)")
+    component_lines = _as_list(v.get("component_lines"))
+    banner = (v.get("banner") or "").strip()
 
-    # Incidentes
-    lines += ["", "Incidents today"]
-    if not inc:
-        lines.append("- No incidents reported today.")
+    if component_lines:
+        lines.append("Component status")
+        for cl in component_lines:
+            cln = str(cl).replace("• ", "- ")
+            if not (cln.startswith("-") or cln.startswith("–")):
+                cln = "- " + cln
+            lines.append(cln)
+        lines.append("")
+    elif banner:
+        # Mostrar banner si existe (sin forzar cabecera 'Component status')
+        btxt = banner if banner.lower().startswith("system status") else f"System status: {banner}"
+        lines.append(btxt)
+        lines.append("")
+
+    incidents_lines = _as_list(v.get("incidents_lines"))
+    if incidents_lines:
+        for il in incidents_lines:
+            lines.append(str(il).replace("• ", "- "))
     else:
-        # si sólo viene una línea 'No incidents ...'
-        only_no = len(inc) == 1 and "no incidents" in inc[0].lower()
-        if only_no:
-            lines.append("- No incidents reported today.")
-        else:
-            # para Netskope, intenta preservar headings típicos
-            if slug == "netskope":
-                # Recompone en dos bloques si detecta keywords
-                lower_join = "\n".join(inc).lower()
-                if any(k in lower_join for k in netskope_headings["Incidentes activos"]):
-                    lines.append("Incidentes activos")
-                # vuelca líneas
-                for s in dedupe_keep_order(inc):
-                    lines.append(s if s.startswith("- ") else f"- {s}")
-            else:
-                for s in dedupe_keep_order(inc):
-                    lines.append(s if s.startswith("- ") else f"- {s}")
+        lines.append("- No incidents reported today.")
 
     return "\n".join(lines)
 
-# ========== Métricas básicas (heurísticas) ==========
+# ------------- Métricas simples ------------- #
 
-TODAY = today_utc_date()
-ACTIVE_HINTS = ("investigating", "identified", "monitoring", "degraded", "partial outage", "major outage", "not operational")
-RESOLVED_HINT = "resolved"
-MAINT_HINTS = ("maintenance", "under maintenance", "[scheduled]")
+def count_metrics(vendors: List[Dict[str, Any]]) -> Tuple[int, int, int]:
+    """
+    Devuelve (activos_total, resueltos_hoy_total, mantenimientos_hoy_total) de forma conservadora.
+    - Activos: líneas NO vacías bajo una sección que contenga 'Incidentes activos' y que no sea 'No hay...'
+    - Resueltos hoy: bajo secciones de resueltos con una línea 'Fin: YYYY-MM-DD ...' de HOY (UTC).
+    - Mantenimiento: detectar 'Under Maintenance' en component_lines o incidents_lines.
+    """
+    activos = 0
+    resueltos_hoy = 0
+    mantenimientos = 0
+    today = _today_utc_str()
 
-def count_metrics_per_vendor(v: dict) -> Dict[str, int]:
-    inc = best_inc_lines("", v)
-    inc_lc = [x.lower() for x in inc]
-    m = {"activos": 0, "resueltos_hoy": 0, "nuevos_hoy": 0, "mants_hoy": 0}
-    for ln in inc_lc:
-        if "no incidents" in ln:
-            continue
-        if any(h in ln for h in ACTIVE_HINTS) and RESOLVED_HINT not in ln:
-            m["activos"] += 1
-        inicio_today = ("inicio:" in ln and TODAY in ln)
-        fin_today    = ("fin:" in ln and TODAY in ln)
-        any_today    = TODAY in ln
-        if inicio_today and RESOLVED_HINT not in ln:
-            m["nuevos_hoy"] += 1
-        if fin_today or (RESOLVED_HINT in ln and any_today):
-            m["resueltos_hoy"] += 1
-        if any(h in ln for h in MAINT_HINTS) and any_today:
-            m["mants_hoy"] += 1
-    return m
+    for v in vendors:
+        inc = _as_list(v.get("incidents_lines"))
+        comp = _as_list(v.get("component_lines"))
 
-# ========== OBS_CLAVE ==========
+        # Activos (buscar bloque que empieza con 'Incidentes activos')
+        i = 0
+        while i < len(inc):
+            line = inc[i].strip().lower()
+            if "incidentes activos" in line or "active incidents" in line:
+                i += 1
+                # contar hasta un separador en blanco o hasta otra cabecera conocida
+                while i < len(inc):
+                    l = inc[i].strip()
+                    low = l.lower()
+                    if not l or "últimos 15 días" in low or "past incidents" in low or "resuelt" in low:
+                        break
+                    if not ("no hay incidentes" in low or "no incidents" in low):
+                        activos += 1
+                    i += 1
+                break
+            i += 1
 
-def build_obs_clave(vendors: Dict[str, dict]) -> str:
-    if not vendors:
-        return "No hay datos de fabricantes para este periodo."
-    total = len(vendors)
-    oks = sum(1 for v in vendors.values() if v.get("overall_ok") is True)
-    if oks == total and total > 0:
-        return "Todos los fabricantes reportan estado operacional sin incidentes hoy."
-    afect = total - oks
-    if afect <= 0:
-        return "Sin señales de incidencia relevantes hoy."
-    return f"Se observa actividad en {afect} de {total} fabricantes (ver detalle por fabricante)."
+        # Resueltos hoy (buscar líneas de fecha Fin: ... con la fecha de hoy)
+        for i in range(len(inc)):
+            l = inc[i]
+            if "fin:" in l.lower():
+                dt = _parse_dt_from_line(l)
+                if dt and dt.astimezone(timezone.utc).strftime("%Y-%m-%d") == today:
+                    resueltos_hoy += 1
 
-# ========== Lectura de JSONs y generación del agregado ==========
+        # Mantenimiento (heurística)
+        text_all = " ".join(comp + inc).lower()
+        if "under maintenance" in text_all or "maintenance" in text_all:
+            # contar 1 por vendor con mantenimiento visible
+            mantenimientos += 1
 
-def load_vendor_jsons(vendors_dir: str) -> Dict[str, dict]:
-    data: Dict[str, dict] = {}
-    if not os.path.isdir(vendors_dir):
-        return data
-    for fname in sorted(os.listdir(vendors_dir)):
-        if not fname.endswith(".json"):
-            continue
-        slug = os.path.splitext(fname)[0].lower()
-        path = os.path.join(vendors_dir, fname)
-        try:
-            with open(path, "r", encoding="utf-8") as f:
-                v = json.load(f)
-            if isinstance(v, dict):
-                data[slug] = v
-        except Exception:
-            continue
-    return data
+    return activos, resueltos_hoy, mantenimientos
+
+# ------------- Fuentes ------------- #
+
+DEFAULT_SOURCES = [
+    ("Aruba Central — Status", "https://centralstatus.arubanetworking.hpe.com/"),
+    ("CyberArk Privilege Cloud — Status", "https://privilegecloud-service-status.cyberark.com/"),
+    ("Akamai (Guardicore) — Status", "https://www.akamaistatus.com/"),
+    ("Imperva — Status", "https://status.imperva.com/"),
+    ("Netskope — Trust Portal", "https://trustportal.netskope.com/incidents"),
+    ("Proofpoint — Current Incidents", "https://proofpoint.my.site.com/community/s/proofpoint-current-incidents"),
+    ("Qualys — Status History", "https://status.qualys.com/history?filter=8f7fjwhmd4n0"),
+    ("Trend Micro — Trend Cloud One", "https://status.trendmicro.com/en-US/trend-cloud-one/"),
+    ("Trend Micro — Trend Vision One", "https://status.trendmicro.com/en-US/trend-vision-one/"),
+]
+
+def build_sources_blocks() -> Tuple[str, str]:
+    # Texto plano (para .txt)
+    txt_lines = [f"- {label} ({url})" for (label, url) in DEFAULT_SOURCES]
+    txt_block = "\n".join(txt_lines)
+
+    # HTML <li> (para plantilla HTML)
+    li_lines = [f'<li><a href="{url}">{label}</a></li>' for (label, url) in DEFAULT_SOURCES]
+    li_block = "\n".join(li_lines)
+    return txt_block, li_block
+
+# ------------- Main build ------------- #
 
 def main():
-    ap = argparse.ArgumentParser(description="Construye el JSON de datos para el digest DORA (robusto)")
-    ap.add_argument("--vendors-dir", required=True, help="Directorio con JSON por vendor")
+    ap = argparse.ArgumentParser(description="Construye datos agregados para el digest DORA")
+    ap.add_argument("--vendors-dir", required=True, help="Directorio con JSONs por vendor")
     ap.add_argument("--out", required=True, help="Ruta de salida del JSON agregado")
     args = ap.parse_args()
 
-    vendors_data = load_vendor_jsons(args.vendors_dir)
-    slugs = sorted(vendors_data.keys())
-    num_vendors = len(slugs)
+    # Cargar vendors
+    files = _list_vendor_files(args.vendors_dir)
+    vendors: List[Dict[str, Any]] = []
+    for p in files:
+        v = _read_json(p)
+        if v:
+            vendors.append(v)
 
-    vendor_blocks: List[str] = []
-    for slug in slugs:
-        vendor_blocks.append(format_vendor_block(slug, vendors_data.get(slug, {}) or {}))
-    DETALLES_POR_VENDOR_TEXTO = "\n\n".join(vendor_blocks)
+    # Render de bloques por vendor (sin duplicaciones)
+    vendor_blocks: List[str] = [render_vendor_block(v) for v in vendors]
+    detalles_por_vendor_texto = "\n\n".join(vendor_blocks)
 
-    lista_fuentes_html, fuentes_texto = build_sources_lists(slugs)
+    # Métricas básicas
+    activos, resueltos_hoy, mantenimientos = count_metrics(vendors)
+    # 'Nuevos hoy' ≈ activos (conservador). Si prefieres 0, pon 0.
+    nuevos_hoy = activos
 
-    total_activos = total_resueltos_hoy = total_nuevos_hoy = total_mants_hoy = 0
-    for slug in slugs:
-        v = vendors_data.get(slug, {}) or {}
-        m = count_metrics_per_vendor(v)
-        total_activos       += m["activos"]
-        total_resueltos_hoy += m["resueltos_hoy"]
-        total_nuevos_hoy    += m["nuevos_hoy"]
-        total_mants_hoy     += m["mants_hoy"]
+    # Ventana de observación
+    now_utc = datetime.now(timezone.utc)
+    start_utc = now_utc.replace(hour=0, minute=0, second=0, microsecond=0)
+    ventana_utc = f"{start_utc.strftime('%Y-%m-%d 00:00')}–{now_utc.strftime('%Y-%m-%d %H:%M')}"
 
-    obs = build_obs_clave(vendors_data)
+    # Saludo
+    saludo = _greeting_madrid(now_utc)
 
-    data_out = {
-        "NUM_PROVEEDORES": str(num_vendors),
-        "INC_NUEVOS_HOY": str(total_nuevos_hoy),
-        "INC_ACTIVOS": str(total_activos),
-        "INC_RESUELTOS_HOY": str(total_resueltos_hoy),
-        "MANTENIMIENTOS_HOY": str(total_mants_hoy),
+    # Observación clave (simple)
+    if activos > 0:
+        obs = f"Se detectan incidentes activos en {activos} registr{'o' if activos==1 else 'os'}."
+    elif resueltos_hoy > 0:
+        obs = f"Se han resuelto {resueltos_hoy} incidente{sufijo(resueltos_hoy)} durante la ventana."
+    else:
+        obs = "Sin incidentes activos reportados."
+
+    # Fuentes
+    fuentes_txt, fuentes_html = build_sources_blocks()
+
+    # Siguiente reporte (UTC -> fecha)
+    fecha_sig = (now_utc + timedelta(days=1)).strftime("%Y-%m-%d")
+
+    data_out: Dict[str, Any] = {
+        # Campos usados por las plantillas
+        "FECHA_UTC": now_utc.strftime("%Y-%m-%d"),
+        "HORA_MUESTREO_UTC": now_utc.strftime("%H:%M"),
+        "VENTANA_UTC": ventana_utc,
+        "NUM_PROVEEDORES": str(len(vendors)),
+
+        "INC_NUEVOS_HOY": str(nuevos_hoy),
+        "INC_ACTIVOS": str(activos),
+        "INC_RESUELTOS_HOY": str(resueltos_hoy),
+        "MANTENIMIENTOS_HOY": str(mantenimientos),
 
         "OBS_CLAVE": obs,
-        "DETALLES_POR_VENDOR_TEXTO": DETALLES_POR_VENDOR_TEXTO,
+        "SALUDO_LINEA": saludo,
 
-        "LISTA_FUENTES_CON_ENLACES": lista_fuentes_html,
-        "FUENTES_TEXTO": fuentes_texto,
+        "DETALLES_POR_VENDOR_TEXTO": detalles_por_vendor_texto,
 
-        "TABLA_INCIDENTES_HOY": "",
-        "TABLA_INCIDENTES_15D": "",
+        # Fuentes (texto y HTML)
+        "LISTA_FUENTES_URLS": "\n".join(line for line in fuentes_txt.splitlines() if line.strip()),
+        "LISTA_FUENTES_CON_ENLACES": "\n".join(line for line in fuentes_html.splitlines() if line.strip()),
 
-        "FIRMA_HTML": os.getenv("DORA_FIRMA_HTML", "").strip(),
-        "NOMBRE_CONTACTO": os.getenv("DORA_NOMBRE_CONTACTO", "").strip(),
-        "ENLACE_O_REFERENCIA_INTERNA": os.getenv("DORA_ENLACE_CRITERIOS", "").strip(),
-        "ENLACE_O_TEXTO_CRITERIOS": os.getenv("DORA_ENLACE_CRITERIOS", "").strip(),
+        # Recomendaciones (si no defines valores en otro sitio, se dejan vacíos)
         "IMPACTO_CLIENTE_SI_NO": "",
         "ACCION_SUGERIDA": "",
-        "FECHA_SIGUIENTE_REPORTE": today_utc_date(),
+        "FECHA_SIGUIENTE_REPORTE": fecha_sig,
+
+        # Campos que ya no usamos pero dejamos presentes (vacíos) por compatibilidad
+        "TABLA_INCIDENTES_HOY": "",
+        "TABLA_INCIDENTES_15D": "",
     }
 
+    # Guardar
     os.makedirs(os.path.dirname(args.out), exist_ok=True)
     with open(args.out, "w", encoding="utf-8") as f:
         json.dump(data_out, f, ensure_ascii=False, indent=2)
 
-    print(f"[build_digest_data] OK -> {args.out} ({num_vendors} vendors)")
+    print(f"[ok] Escrito {args.out} con {len(vendors)} vendor(s).")
+
+def sufijo(n: int) -> str:
+    return "" if n == 1 else "s"
 
 if __name__ == "__main__":
     main()
