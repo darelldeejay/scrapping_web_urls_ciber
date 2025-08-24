@@ -138,15 +138,25 @@ def inject_defaults(data: Dict[str, str]) -> Dict[str, str]:
     merged["SALUDO_LINEA"] = saludo_linea
     return merged
 
-# ---------------- Normalización para el cuerpo de TEXTO ----------------
+# ---------------- HTML->TXT (listas conservando URLs) ----------------
 
 LI_RE = re.compile(r"(?is)<li\b[^>]*>(.*?)</li\s*>")
 TAGS_SIMPLE_RE = re.compile(r"(?is)</?(?:ul|ol)\b[^>]*>")
+A_HREF_RE = re.compile(r'(?is)<a\b[^>]*\bhref=[\'"]([^\'"]+)[\'"][^>]*>(.*?)</a\s*>')
+
+def _anchor_to_text(s: str) -> str:
+    def repl(m: re.Match) -> str:
+        url = m.group(1).strip()
+        txt = m.group(2).strip()
+        txt = re.sub(r"(?is)<[^>]+>", "", txt)
+        return f"{html.unescape(txt)} ({url})"
+    return A_HREF_RE.sub(repl, s)
 
 def _html_list_to_text_bullets(s: str) -> str:
-    """Convierte listas <li>…</li> a viñetas '- …' en texto plano."""
+    """Convierte listas HTML a viñetas, preservando anchors como 'Texto (URL)'."""
     if not s or ("<li" not in s and "</li>" not in s):
         return s
+    s = _anchor_to_text(s)
     def _one_li(m: re.Match) -> str:
         inner = m.group(1) or ""
         inner = re.sub(r"(?is)<[^>]+>", "", inner)
@@ -169,7 +179,6 @@ def env_or_raise(name: str) -> str:
     return val
 
 def send_telegram_text(subject: str, text_body: str, dry_run: bool) -> None:
-    """Envía SOLO TEXTO a Telegram (asunto + cuerpo)."""
     if dry_run:
         return
     token = env_or_raise("TELEGRAM_BOT_TOKEN")
@@ -185,11 +194,6 @@ def send_telegram_text(subject: str, text_body: str, dry_run: bool) -> None:
             raise RuntimeError(f"Telegram error ({r.status_code}): {msg}")
 
 def send_teams_html(subject: str, html_block_md: str, dry_run: bool) -> None:
-    """
-    Envía a Teams (webhook) un MessageCard con:
-      - title = subject
-      - text  = bloque HTML dentro de un code fence (markdown)
-    """
     if dry_run:
         return
     webhook = env_or_raise("TEAMS_WEBHOOK_URL")
@@ -199,7 +203,7 @@ def send_teams_html(subject: str, html_block_md: str, dry_run: bool) -> None:
         "summary": subject,
         "themeColor": "2B579A",
         "title": subject,
-        "text": html_block_md  # HTML en bloque pegable
+        "text": html_block_md
     }
     r = requests.post(webhook, json=card, timeout=30)
     if r.status_code >= 300:
@@ -230,46 +234,35 @@ def main():
     ap.add_argument("--data")
     ap.add_argument("--channels", default="telegram,teams", help="telegram,teams,both,none")
     ap.add_argument("--preview-out", help="Directorio para previsualización (no envía)")
-    # Compatibilidad: aceptar --also-text pero ignorarlo (ya enviamos texto a Telegram y HTML a Teams)
     ap.add_argument("--also-text", action="store_true", help="(compat) ignorado; Telegram ya recibe texto")
     args = ap.parse_args()
 
     data = inject_defaults(load_data(args.data))
-    # Fallback: si falta FUENTES_TEXTO pero hay la lista HTML, conviértela
-    if not data.get("FUENTES_TEXTO") and data.get("LISTA_FUENTES_CON_ENLACES"):
-        data["FUENTES_TEXTO"] = _html_list_to_text_bullets(data["LISTA_FUENTES_CON_ENLACES"])
 
     text_subject_tpl, text_body_tpl = load_text_template(args.text_template)
     html_subject_tpl, html_tpl = load_html_template(args.html_template)
 
-    # Render de cuerpos
     text_body = render_placeholders(text_body_tpl, data)
     html_body = render_placeholders(html_tpl, data)
 
-    # Si el cuerpo de texto aún contiene <li>…</li>, conviértelo a viñetas
+    # Conversión de listas HTML -> bullets en TXT (preserva URLs)
     if "<li" in text_body or "</li>" in text_body:
         text_body = _html_list_to_text_bullets(text_body)
 
-    # Render del SUBJECT (procesamos placeholders)
     subject_override = render_subject_candidate(data.get("SUBJECT"), data)
     text_subject = render_subject_candidate(text_subject_tpl, data)
     html_subject = render_subject_candidate(html_subject_tpl, data)
     subject = subject_override or text_subject or html_subject or "DORA Daily Digest"
 
-    # Bloque HTML para canales que no renderizan HTML (Teams -> code fence)
     html_block_md = wrap_codeblock("html", html_body)
-
-    # DRY-RUN si preview_out o env NOTIFY_DRY_RUN
     dry_run = bool(args.preview_out) or is_truthy_env("NOTIFY_DRY_RUN")
 
-    # Selección de canales
     selected = {c.strip().lower() for c in args.channels.split(",") if c.strip()}
     if "both" in selected:
         selected = {"telegram", "teams"}
     if "none" in selected:
         selected = set()
 
-    # Previsualización (no envío)
     if dry_run:
         preview_dir = args.preview_out or ".github/out/preview"
         write_preview(preview_dir, subject, html_block_md, f"{subject}\n\n{text_body}", html_body)
@@ -278,14 +271,12 @@ def main():
 
     errors: List[str] = []
 
-    # TELEGRAM -> TEXTO
     if "telegram" in selected:
         try:
             send_telegram_text(subject, text_body, dry_run=False)
         except Exception as e:
             errors.append(f"Telegram: {e}")
 
-    # TEAMS -> HTML (code fence)
     if "teams" in selected:
         try:
             send_teams_html(subject, html_block_md, dry_run=False)
