@@ -38,10 +38,23 @@ except Exception:
 URL = "https://status.imperva.com/"
 SAVE_HTML = os.getenv("SAVE_HTML", "0") == "1"
 
+# Minimum length for a valid incident title (to filter out status words)
+MIN_INCIDENT_TITLE_LENGTH = 10
+
 # Estados problemáticos típicos (Statuspage)
 ISSUE_STATUS_RE = re.compile(r"(Degraded Performance|Partial Outage|Major Outage|Under Maintenance)", re.I)
 OPERATIONAL_RE = re.compile(r"\bOperational\b", re.I)
 NO_INCIDENTS_TODAY_RE = re.compile(r"No incidents reported today", re.I)
+
+# Estados activos de incidentes que debemos detectar
+ACTIVE_STATUS_KEYWORDS = [
+    "Investigating", "Identified", "Monitoring", "Update", "Mitigated",
+    "In Progress", "Degraded Performance", "Partial Outage", "Major Outage"
+]
+ACTIVE_STATUS_PATTERN = re.compile(
+    r"\b(" + "|".join(re.escape(k) for k in ACTIVE_STATUS_KEYWORDS) + r")\b",
+    re.I
+)
 
 def now_utc_str():
     # Para mensajes legacy (con sufijo "UTC")
@@ -201,12 +214,18 @@ def today_header_strings():
     formats.add(now.strftime("%Y-%m-%d"))
     
     # Formato con día primero: "01 Feb 2026", "1 Feb 2026"
-    formats.add(now.strftime("%d %b %Y"))
-    formats.add(now.strftime("%d %b %Y").lstrip("0"))
+    day_first = now.strftime("%d %b %Y")
+    formats.add(day_first)
+    # Remover solo el primer cero si el día empieza con 0
+    if day_first.startswith("0"):
+        formats.add(day_first[1:])
     
     # Variante con guiones: "01-Feb-2026", "1-Feb-2026"
-    formats.add(now.strftime("%d-%b-%Y"))
-    formats.add(now.strftime("%d-%b-%Y").lstrip("0"))
+    day_first_dash = now.strftime("%d-%b-%Y")
+    formats.add(day_first_dash)
+    # Remover solo el primer cero si el día empieza con 0
+    if day_first_dash.startswith("0"):
+        formats.add(day_first_dash[1:])
     
     return formats
 
@@ -275,7 +294,7 @@ def find_active_incidents(soup: BeautifulSoup):
             # Buscar primer link o texto en negrita que parezca un título
             for tag in inc.find_all(['a', 'strong', 'b', 'h1', 'h2', 'h3', 'h4']):
                 text = collapse_ws(tag.get_text(" ", strip=True))
-                if text and len(text) > 10 and not text.lower().startswith(('investigating', 'identified', 'monitoring', 'update')):
+                if text and len(text) > MIN_INCIDENT_TITLE_LENGTH and not text.lower().startswith(('investigating', 'identified', 'monitoring', 'update')):
                     title = text
                     break
         
@@ -301,8 +320,8 @@ def find_active_incidents(soup: BeautifulSoup):
         
         # Si no encontró status en el update, buscar en el incidente completo
         if not status_word:
-            # Buscar palabras de estado común
-            status_match = re.search(r"\b(Investigating|Identified|Monitoring|Update|Mitigated|In Progress|Degraded Performance|Partial Outage|Major Outage)\b", inc_text, re.I)
+            # Buscar palabras de estado común usando el patrón definido
+            status_match = ACTIVE_STATUS_PATTERN.search(inc_text)
             if status_match:
                 status_word = status_match.group(1)
         
