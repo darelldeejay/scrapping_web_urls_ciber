@@ -200,8 +200,8 @@ def find_today_day_block(soup: BeautifulSoup):
 
 def find_active_incidents(soup: BeautifulSoup):
     """
-    Busca incidentes activos/no resueltos en toda la página, no solo en el bloque de hoy.
-    Esto captura incidentes que comenzaron en días anteriores pero siguen activos.
+    Finds active/unresolved incidents anywhere on the page, not just in today's block.
+    This captures incidents that started on previous days but are still active.
     """
     items = []
     # Buscar incidentes no resueltos en toda la página
@@ -261,10 +261,6 @@ def parse_incidents_today(soup: BeautifulSoup):
         full = collapse_ws(soup.get_text(" ", strip=True))
         if NO_INCIDENTS_TODAY_RE.search(full):
             return {"date": default_date, "count": 0, "items": ["- No incidents reported today."]}
-        
-        # Si hay incidentes activos, reportarlos
-        if active_items:
-            return {"date": default_date, "count": len(active_items), "items": active_items}
             
         return {"date": default_date, "count": 0, "items": ["- No incidents reported today."]}
 
