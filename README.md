@@ -181,6 +181,13 @@ NOTIFY_DRY_RUN=true python run_digest.py   --text-template templates/dora_email.
 
 ## 🩺 Troubleshooting rápido
 
+- **El workflow no se ejecuta / está deshabilitado**  
+  GitHub deshabilita automáticamente los workflows después de 60 días de inactividad en el repositorio. Para reactivarlo:
+  1. Ve a **Actions** en el repositorio de GitHub
+  2. Selecciona el workflow **status-check**
+  3. Haz clic en **Enable workflow**
+  4. Opcionalmente, ejecuta manualmente con **Run workflow** para verificar que funciona
+
 - **“Network is unreachable” al enviar a Telegram en CI**  
   Usa modo *preview* (`dry_run=true`) para validar el output mientras se restablece la salida a Internet del runner. Verifica `TELEGRAM_*` y `TEAMS_WEBHOOK_URL`.
 

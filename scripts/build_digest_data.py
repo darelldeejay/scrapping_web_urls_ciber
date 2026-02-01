@@ -36,8 +36,7 @@ SOURCES = [
     ("Netskope — Trust Portal", "https://trustportal.netskope.com/incidents"),
     ("Proofpoint — Current Incidents", "https://proofpoint.my.site.com/community/s/proofpoint-current-incidents"),
     ("Qualys — Status History", "https://status.qualys.com/history?filter=8f7fjwhmd4n0"),
-    ("Trend Micro — Trend Cloud One", "https://status.trendmicro.com/en-US/trend-cloud-one/"),
-    ("Trend Micro — Trend Vision One", "https://status.trendmicro.com/en-US/trend-vision-one/"),
+    ("Trend Micro — Status", "https://status.trendmicro.com/"),
 ]
 
 def build_sources_blocks() -> Tuple[str, str]:

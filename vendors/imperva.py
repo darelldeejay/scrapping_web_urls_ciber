@@ -38,10 +38,23 @@ except Exception:
 URL = "https://status.imperva.com/"
 SAVE_HTML = os.getenv("SAVE_HTML", "0") == "1"
 
+# Minimum length for a valid incident title (to filter out status words)
+MIN_INCIDENT_TITLE_LENGTH = 10
+
 # Estados problemáticos típicos (Statuspage)
 ISSUE_STATUS_RE = re.compile(r"(Degraded Performance|Partial Outage|Major Outage|Under Maintenance)", re.I)
 OPERATIONAL_RE = re.compile(r"\bOperational\b", re.I)
 NO_INCIDENTS_TODAY_RE = re.compile(r"No incidents reported today", re.I)
+
+# Estados activos de incidentes que debemos detectar
+ACTIVE_STATUS_KEYWORDS = [
+    "Investigating", "Identified", "Monitoring", "Update", "Mitigated",
+    "In Progress", "Degraded Performance", "Partial Outage", "Major Outage"
+]
+ACTIVE_STATUS_PATTERN = re.compile(
+    r"\b(" + "|".join(re.escape(k) for k in ACTIVE_STATUS_KEYWORDS) + r")\b",
+    re.I
+)
 
 def now_utc_str():
     # Para mensajes legacy (con sufijo "UTC")
@@ -176,10 +189,45 @@ def parse_components(soup: BeautifulSoup):
 # ---------- Incidentes: SOLO el día actual ----------
 
 def today_header_strings():
+    """
+    Genera múltiples formatos de fecha para hoy, para capturar diferentes
+    formatos que Imperva podría usar.
+    """
     now = datetime.utcnow()
+    formats = set()
+    
+    # Formato abreviado con cero: "Feb 01, 2026"
+    formats.add(now.strftime("%b %d, %Y"))
+    
+    # Formato abreviado sin cero: "Feb 1, 2026"
     with_zero = now.strftime("%b %d, %Y")
-    no_zero  = with_zero.replace(" 0", " ")
-    return {with_zero, no_zero}
+    formats.add(with_zero.replace(" 0", " "))
+    
+    # Formato completo con cero: "February 01, 2026"
+    formats.add(now.strftime("%B %d, %Y"))
+    
+    # Formato completo sin cero: "February 1, 2026"
+    full_with_zero = now.strftime("%B %d, %Y")
+    formats.add(full_with_zero.replace(" 0", " "))
+    
+    # Formato ISO: "2026-02-01"
+    formats.add(now.strftime("%Y-%m-%d"))
+    
+    # Formato con día primero: "01 Feb 2026", "1 Feb 2026"
+    day_first = now.strftime("%d %b %Y")
+    formats.add(day_first)
+    # Remover solo el primer cero si el día empieza con 0
+    if day_first.startswith("0"):
+        formats.add(day_first[1:])
+    
+    # Variante con guiones: "01-Feb-2026", "1-Feb-2026"
+    day_first_dash = now.strftime("%d-%b-%Y")
+    formats.add(day_first_dash)
+    # Remover solo el primer cero si el día empieza con 0
+    if day_first_dash.startswith("0"):
+        formats.add(day_first_dash[1:])
+    
+    return formats
 
 def find_today_day_block(soup: BeautifulSoup):
     day_blocks = soup.select(".incidents-list .status-day")
@@ -198,16 +246,126 @@ def find_today_day_block(soup: BeautifulSoup):
             return day, date_str
     return None, None
 
+def find_active_incidents(soup: BeautifulSoup):
+    """
+    Finds active/unresolved incidents anywhere on the page, not just in today's block.
+    This captures incidents that started on previous days but are still active.
+    Uses multiple selector strategies to ensure all incidents are captured.
+    """
+    items = []
+    seen_titles = set()  # Para evitar duplicados
+    
+    # Estrategia 1: Selectores específicos conocidos
+    unresolved = soup.select(".unresolved-incident, .incident-container")
+    
+    # Estrategia 2: Buscar cualquier elemento con clase que contenga "incident"
+    # pero que no esté en bloques históricos resueltos
+    all_incidents = soup.find_all(class_=lambda c: c and "incident" in c.lower())
+    unresolved.extend(all_incidents)
+    
+    # Estrategia 3: Buscar en divs que contengan títulos de incidentes
+    incident_titles = soup.select(".incident-title")
+    for title_el in incident_titles:
+        # Navegar al contenedor padre del incidente
+        parent = title_el.find_parent(class_=lambda c: c and "incident" in c.lower())
+        if parent and parent not in unresolved:
+            unresolved.append(parent)
+    
+    for inc in unresolved:
+        if not inc:
+            continue
+            
+        # Verificar si el incidente tiene estado de "resuelto" o "resolved"
+        inc_text = collapse_ws(inc.get_text(" ", strip=True))
+        
+        # Filtrar incidentes completamente resueltos - pero ser más cuidadoso
+        # Solo filtrar si tiene "Resolved" o "Completed" como estado final
+        if re.search(r"\b(Resolved|Completed|Closed)\s*[-—]\s*This incident has been resolved", inc_text, re.I):
+            continue
+        # También filtrar si todo el texto indica resolución
+        if re.search(r"^\s*(Resolved|Completed)\s*[-—]", inc_text, re.I):
+            continue
+            
+        title_el = inc.select_one(".incident-title a, .incident-title, [class*='title']")
+        title = collapse_ws(title_el.get_text(" ", strip=True)) if title_el else ""
+        
+        # Si no encontramos título con selectores, buscar el primer texto significativo
+        if not title:
+            # Buscar primer link o texto en negrita que parezca un título
+            for tag in inc.find_all(['a', 'strong', 'b', 'h1', 'h2', 'h3', 'h4']):
+                text = collapse_ws(tag.get_text(" ", strip=True))
+                if text and len(text) > MIN_INCIDENT_TITLE_LENGTH and not text.lower().startswith(('investigating', 'identified', 'monitoring', 'update')):
+                    title = text
+                    break
+        
+        # Si aún no tenemos título, usar "Incident"
+        if not title:
+            title = "Incident"
+            
+        # Evitar duplicados por título
+        if title.lower() in seen_titles:
+            continue
+        seen_titles.add(title.lower())
+        
+        # Buscar actualizaciones y estado
+        updates = inc.select(".updates-container .update, .incident-update, .update, [class*='update']")
+        latest = updates[0] if updates else None
+        status_word, time_text = "", ""
+        
+        if latest:
+            st_el = latest.select_one("strong, .update-status, .update-title, [class*='status']")
+            tm_el = latest.select_one("small, time, .update-time, [class*='time']")
+            status_word = collapse_ws(st_el.get_text(" ", strip=True)) if st_el else ""
+            time_text = collapse_ws(tm_el.get_text(" ", strip=True)) if tm_el else ""
+        
+        # Si no encontró status en el update, buscar en el incidente completo
+        if not status_word:
+            # Buscar palabras de estado común usando el patrón definido
+            status_match = ACTIVE_STATUS_PATTERN.search(inc_text)
+            if status_match:
+                status_word = status_match.group(1)
+        
+        # Si encontramos un status word pero es "Resolved" al inicio, saltar este incidente
+        if status_word and re.search(r"^(Resolved|Completed)", status_word, re.I):
+            continue
+        
+        pops = extract_pops_from_text(inc_text)
+        pop_suffix = f" [POPs: {', '.join(pops)}]" if pops else ""
+        
+        if status_word and time_text:
+            items.append(f"{status_word} — {title} ({time_text}){pop_suffix}")
+        elif status_word:
+            items.append(f"{status_word} — {title}{pop_suffix}")
+        else:
+            # Si no tenemos status pero tenemos título, incluirlo de todas formas
+            items.append(f"{title}{pop_suffix}")
+    
+    return items
+
 def parse_incidents_today(soup: BeautifulSoup):
     day, date_str = find_today_day_block(soup)
     default_date = list(today_header_strings())[0]
+    
+    # Primero intentar buscar incidentes activos en toda la página
+    active_items = find_active_incidents(soup)
+    
     if not day:
+        # No se encontró bloque de hoy, verificar si hay incidentes activos
+        if active_items:
+            return {"date": default_date, "count": len(active_items), "items": active_items}
+        
+        # Verificar si dice explícitamente "No incidents"
         full = collapse_ws(soup.get_text(" ", strip=True))
         if NO_INCIDENTS_TODAY_RE.search(full):
             return {"date": default_date, "count": 0, "items": ["- No incidents reported today."]}
-        return {"date": default_date, "count": 0, "items": ["- No incidents section found."]}
+            
+        return {"date": default_date, "count": 0, "items": ["- No incidents reported today."]}
 
     if "no-incidents" in (day.get("class") or []):
+        # Aún así, verificar incidentes activos de días anteriores
+        if active_items:
+            return {"date": date_str, "count": len(active_items), "items": active_items}
+        
         msg = day.get_text(" ", strip=True)
         m = NO_INCIDENTS_TODAY_RE.search(msg)
         text = m.group(0) if m else "No incidents reported today."
@@ -238,7 +396,11 @@ def parse_incidents_today(soup: BeautifulSoup):
         else:
             items.append(f"{title}{pop_suffix}")
 
-    return {"date": date_str, "count": len(items), "items": items or ["- (No details)"]}
+    # Si no encontramos incidentes en el bloque de hoy, usar los activos
+    if not items and active_items:
+        items = active_items
+    
+    return {"date": date_str, "count": len(items), "items": items or ["- No incidents reported today."]}
 
 # ---------- Formato mensaje (legacy) ----------
 
