@@ -198,16 +198,81 @@ def find_today_day_block(soup: BeautifulSoup):
             return day, date_str
     return None, None
 
+def find_active_incidents(soup: BeautifulSoup):
+    """
+    Busca incidentes activos/no resueltos en toda la página, no solo en el bloque de hoy.
+    Esto captura incidentes que comenzaron en días anteriores pero siguen activos.
+    """
+    items = []
+    # Buscar incidentes no resueltos en toda la página
+    unresolved = soup.select(".unresolved-incident, .incident-container")
+    
+    for inc in unresolved:
+        # Verificar si el incidente tiene estado de "resuelto" o "resolved"
+        inc_text = collapse_ws(inc.get_text(" ", strip=True))
+        if re.search(r"\b(Resolved|Completed|Closed)\b", inc_text, re.I):
+            continue  # Saltar incidentes resueltos
+            
+        title_el = inc.select_one(".incident-title a, .incident-title")
+        title = collapse_ws(title_el.get_text(" ", strip=True)) if title_el else "Incident"
+        
+        updates = inc.select(".updates-container .update, .incident-update, .update")
+        latest = updates[0] if updates else None
+        status_word, time_text = "", ""
+        
+        if latest:
+            st_el = latest.select_one("strong, .update-status, .update-title")
+            tm_el = latest.select_one("small, time, .update-time")
+            status_word = collapse_ws(st_el.get_text(" ", strip=True)) if st_el else ""
+            time_text = collapse_ws(tm_el.get_text(" ", strip=True)) if tm_el else ""
+        
+        # Si no encontró status en el update, buscar en el incidente completo
+        if not status_word:
+            # Buscar palabras de estado común
+            status_match = re.search(r"\b(Investigating|Identified|Monitoring|Update|Mitigated)\b", inc_text, re.I)
+            if status_match:
+                status_word = status_match.group(1)
+        
+        pops = extract_pops_from_text(inc_text)
+        pop_suffix = f" [POPs: {', '.join(pops)}]" if pops else ""
+        
+        if status_word and time_text:
+            items.append(f"{status_word} — {title} ({time_text}){pop_suffix}")
+        elif status_word:
+            items.append(f"{status_word} — {title}{pop_suffix}")
+        else:
+            items.append(f"{title}{pop_suffix}")
+    
+    return items
+
 def parse_incidents_today(soup: BeautifulSoup):
     day, date_str = find_today_day_block(soup)
     default_date = list(today_header_strings())[0]
+    
+    # Primero intentar buscar incidentes activos en toda la página
+    active_items = find_active_incidents(soup)
+    
     if not day:
+        # No se encontró bloque de hoy, verificar si hay incidentes activos
+        if active_items:
+            return {"date": default_date, "count": len(active_items), "items": active_items}
+        
+        # Verificar si dice explícitamente "No incidents"
         full = collapse_ws(soup.get_text(" ", strip=True))
         if NO_INCIDENTS_TODAY_RE.search(full):
             return {"date": default_date, "count": 0, "items": ["- No incidents reported today."]}
-        return {"date": default_date, "count": 0, "items": ["- No incidents section found."]}
+        
+        # Si hay incidentes activos, reportarlos
+        if active_items:
+            return {"date": default_date, "count": len(active_items), "items": active_items}
+            
+        return {"date": default_date, "count": 0, "items": ["- No incidents reported today."]}
 
     if "no-incidents" in (day.get("class") or []):
+        # Aún así, verificar incidentes activos de días anteriores
+        if active_items:
+            return {"date": date_str, "count": len(active_items), "items": active_items}
+        
         msg = day.get_text(" ", strip=True)
         m = NO_INCIDENTS_TODAY_RE.search(msg)
         text = m.group(0) if m else "No incidents reported today."
@@ -238,7 +303,11 @@ def parse_incidents_today(soup: BeautifulSoup):
         else:
             items.append(f"{title}{pop_suffix}")
 
-    return {"date": date_str, "count": len(items), "items": items or ["- (No details)"]}
+    # Si no encontramos incidentes en el bloque de hoy, usar los activos
+    if not items and active_items:
+        items = active_items
+    
+    return {"date": date_str, "count": len(items), "items": items or ["- No incidents reported today."]}
 
 # ---------- Formato mensaje (legacy) ----------
 
