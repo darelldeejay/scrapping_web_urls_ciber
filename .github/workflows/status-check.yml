@@ -42,6 +42,8 @@ jobs:
   vendors:
     name: Scraping vendors (solo export JSON)
     runs-on: ubuntu-latest
+    permissions:
+      contents: read
     strategy:
       fail-fast: false
       matrix:
@@ -79,6 +81,8 @@ jobs:
   digest:
     name: Build & send digest (Telegram=texto, Teams=HTML)
     runs-on: ubuntu-latest
+    permissions:
+      contents: read
     needs: vendors
     if: always()
     steps:
