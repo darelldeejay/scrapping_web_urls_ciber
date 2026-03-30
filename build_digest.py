@@ -1,4 +1,19 @@
 # build_digest.py
+#
+# ============================================================
+# LEGACY / DEPRECATED — DO NOT USE IN PRODUCTION
+# ============================================================
+# This file is an older, standalone digest builder that imports
+# common.mailer (send_email_smtp), which does NOT exist in the
+# current codebase.  Executing this file will raise an ImportError.
+#
+# The current production workflow uses:
+#   1. scripts/build_digest_data.py  — aggregates per-vendor JSON → digest_data.json
+#   2. run_digest.py                 — renders templates and sends to Telegram/Teams
+#
+# This file is kept for historical reference only.
+# ============================================================
+
 import os
 import importlib
 from datetime import datetime, timezone

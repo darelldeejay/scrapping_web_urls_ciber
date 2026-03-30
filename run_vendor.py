@@ -18,6 +18,8 @@ def main():
     ap.add_argument("--vendor", required=True, help="nombre del vendor (slug): aruba, cyberark, ...")
     ap.add_argument("--export-json", help="ruta de salida JSON con resumen para digest")
     ap.add_argument("--headless", action="store_true", default=True)
+    ap.add_argument("--no-headless", dest="headless", action="store_false",
+                    help="Disable headless mode (show browser window, useful for debugging)")
     args = ap.parse_args()
 
     slug = args.vendor.strip().lower()
