@@ -1,28 +1,39 @@
-Asunto: [BANCO PICHINCHA - DORA] Informe diario de incidentes de proveedores ICT — {{FECHA_UTC}} (UTC)
+Asunto: [BANCO PICHINCHA - DORA] Informe diario de terceros ICT — {{FECHA_UTC}} (UTC)
 
 {{SALUDO_LINEA}}
 
-Compartimos el informe diario de incidentes de terceros tecnológicos (ICT) monitorizados, en apoyo a la resiliencia operativa y a los requisitos de DORA. Importante mencionar que se especifica que la hora que se representa los datos es UTC porque en muchas páginas de los fabricantes se presenta otros husos horarios, estos son convertidos a la hora donde reside el cliente.
+BANCO PICHINCHA - DORA
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+MONITOREO DE TERCEROS ICT
+{{FECHA_UTC}} | {{HORA_MUESTREO_UTC}} (UTC)
 
-Ventana de observación: {{VENTANA_UTC}} · Hora de muestreo: {{HORA_MUESTREO_UTC}} (UTC)
-Alcance: {{NUM_PROVEEDORES}} fabricantes · Fuente: Páginas de estado oficiales ofrecidas por los fabricantes.
+┌─────────────────────────────────────┐
+│           RESUMEN EJECUTIVO                 │
+├─────────────────────────────────────┤
+│ Proveedores monitorizados: {{NUM_PROVEEDORES}}     │
+│ Incidentes nuevos hoy:    {{INC_NUEVOS_HOY}}       │
+│ Incidentes activos:       {{INC_ACTIVOS}}          │
+│ Incidentes resueltos hoy: {{INC_RESUELTOS_HOY}}    │
+│ Mantenimientos hoy:       {{MANTENIMIENTOS_HOY}}   │
+└─────────────────────────────────────┘
 
-Detalles por fabricante:
+EVALUACIÓN DE RIESGO DORA
+{{OBS_CLAVE}}
+
+ESTADO POR PROVEEDOR ICT
 {{DETALLES_POR_VENDOR_TEXTO}}
 
-Resumen ejecutivo
-- Incidentes nuevos hoy: {{INC_NUEVOS_HOY}}
-- Incidentes activos: {{INC_ACTIVOS}}
-- Incidentes resueltos hoy: {{INC_RESUELTOS_HOY}}
-- Mantenimientos programados hoy: {{MANTENIMIENTOS_HOY}}
-- Observación clave: {{OBS_CLAVE}}
+IMPACTO OPERACIONAL
+• Impacto cliente: {{IMPACTO_CLIENTE_SI_NO}}
+• Acción requerida: {{ACCION_SUGERIDA}}
 
-Recomendaciones operativas
-- Impacto en servicios del cliente: {{IMPACTO_CLIENTE_SI_NO}}
-- Acción sugerida (si aplica): {{ACCION_SUGERIDA}}
-- Próxima revisión programada: {{FECHA_SIGUIENTE_REPORTE}} (UTC)
+CUMPLIMIENTO NORMATIVO
+✓ DORA Article 28 - Monitoreo terceros: CUMPLE
+Próxima revisión: {{FECHA_SIGUIENTE_REPORTE}} (UTC)
 
-Fuentes
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+Fuentes monitorizadas:
 {{LISTA_FUENTES_TXT}}
 
-Cualquier duda o si deseas ampliar detalle de algún incidente, nuestro equipo de SOC queda a vuestra entera disposición.
+Para escalamiento o consultas técnicas, contactar al equipo SOC.
+Ventana de observación: {{VENTANA_UTC}} | Fuente: Páginas oficiales fabricantes
