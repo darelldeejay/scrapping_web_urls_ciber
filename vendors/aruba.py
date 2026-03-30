@@ -41,7 +41,7 @@ NO_INCIDENTS_TODAY_RE = re.compile(r"No incidents reported today", re.I)
 
 def now_utc_str():
     # Mensajes legacy
-    return datetime.utcnow().strftime("%Y-%m-%d %H:%M UTC")
+    return datetime.now(timezone.utc).strftime("%Y-%m-%d %H:%M UTC")
 
 def _now_utc_clean():
     # Para export JSON (el digest añade 'UTC')

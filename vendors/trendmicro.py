@@ -62,7 +62,7 @@ STATUS_MAP = {
 # ---------------- Utilidades ---------------- #
 
 def now_utc_str() -> str:
-    return datetime.utcnow().strftime("%Y-%m-%d %H:%M UTC")
+    return datetime.now(timezone.utc).strftime("%Y-%m-%d %H:%M UTC")
 
 def _now_utc_clean() -> str:
     """Para export JSON (sin sufijo 'UTC'; lo añade el renderer)."""
@@ -191,7 +191,7 @@ def parse_ssp_records_for_product(html: str, product_name: str) -> List[Dict[str
 # ---------- Solo HOY ----------
 
 def is_today_utc(dtobj: datetime) -> bool:
-    now = datetime.utcnow()
+    now = datetime.now(timezone.utc)
     return (dtobj.year, dtobj.month, dtobj.day) == (now.year, now.month, now.day)
 
 def summarize_today(records: List[Dict[str, Any]]) -> Dict[str, Any]:
