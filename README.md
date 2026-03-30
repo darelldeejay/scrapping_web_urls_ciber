@@ -48,6 +48,7 @@ common/
   browser.py      # arranque Selenium (Chrome headless)
   notify.py       # envío Telegram/Teams
   format.py       # helpers de formato comunes (cabeceras, listas, etc.)
+  templates.py    # carga y renderizado de plantillas
 vendors/
   aruba.py        # Aruba Central
   cyberark.py     # CyberArk Privilege Cloud
@@ -67,6 +68,10 @@ run_digest.py     # renderiza plantillas y envía a canales
 .github/workflows/status-check.yml  # pipeline CI
 requirements.txt
 ```
+
+> ⚠️ **Archivo legado — NO USAR**: `build_digest.py` (raíz del proyecto).  
+> Este archivo es código histórico **roto**: importa `common.mailer` que no existe.  
+> El flujo de producción es exclusivamente el descrito arriba.
 
 ---
 
@@ -151,6 +156,7 @@ NOTIFY_DRY_RUN=true python run_digest.py   --text-template templates/dora_email.
 **Flags útiles**
 - `NOTIFY_DRY_RUN=true` → previsualiza sin enviar
 - `SAVE_HTML=1` en el job de vendors → guarda el HTML descargado para depurar parsers
+- `--no-headless` en `run_vendor.py` → abre el navegador visible para depuración local
 
 ---
 
@@ -199,6 +205,14 @@ NOTIFY_DRY_RUN=true python run_digest.py   --text-template templates/dora_email.
 
 - **Necesito ver el DOM para ajustar selectores**  
   Ejecuta un vendor con `SAVE_HTML=1` y revisa el archivo guardado en el workspace del job.
+
+- **Quiero ver el navegador abierto al depurar localmente**  
+  Usa la flag `--no-headless` al ejecutar `run_vendor.py` (solo funciona en local, no en CI):
+  ```bash
+  python run_vendor.py --vendor guardicore --no-headless
+  ```
+  Por defecto el navegador siempre arranca en modo headless (invisible), lo que es correcto para CI.  
+  `--headless` sigue funcionando igual que antes para compatibilidad.
 
 > Más en la Wiki: “Troubleshooting & FAQ”.
 
