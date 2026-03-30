@@ -80,13 +80,46 @@
             color: #495057; font-size: 15px; line-height: 1.6;
         }
 
-        /* Vendor details mejorados */
-        .vendor-details { 
-            background: #f8fafc; border: 1px solid #e9ecef; 
-            border-radius: 6px; padding: 25px; margin: 20px 0;
+        /* VENDOR DETAILS MEJORADOS - NUEVA SECCIÓN */
+        .vendor-details-improved {
+            background: #ffffff; 
+            border: 1px solid #dee2e6; 
+            border-radius: 8px; 
+            margin: 20px 0;
+            overflow: hidden;
+            box-shadow: 0 1px 3px rgba(0,0,0,0.05);
+        }
+
+        .vendor-header {
+            background: linear-gradient(90deg, #e9ecef 0%, #f8f9fa 100%);
+            padding: 15px 25px;
+            border-bottom: 1px solid #dee2e6;
+            font-weight: 600;
+            font-size: 14px;
+            color: #495057;
+            letter-spacing: 0.5px;
+        }
+
+        .vendor-content {
+            background: #fafbfc; 
+            padding: 25px; 
+            margin: 0;
             font-family: 'SF Mono', Consolas, 'Courier New', monospace; 
-            font-size: 13px; line-height: 1.6;
-            white-space: pre-wrap; 
+            font-size: 13px; 
+            line-height: 1.8;
+            white-space: pre-wrap;
+            word-break: break-word;
+            border: none;
+            color: #2c3e50;
+        }
+
+        /* Separadores visuales para fabricantes */
+        .vendor-content::before {
+            content: "";
+            display: block;
+            height: 2px;
+            background: linear-gradient(90deg, #17a2b8 0%, transparent 100%);
+            margin: -10px 0 15px 0;
         }
 
         /* Recommendations limpias */
@@ -133,6 +166,16 @@
         .footer-compliance { 
             font-size: 12px; opacity: 0.8; border-top: 1px solid #495057;
             padding-top: 15px; margin-top: 15px;
+        }
+
+        /* Responsive design */
+        @media (max-width: 600px) {
+            .dashboard { grid-template-columns: repeat(2, 1fr); }
+            .sources-list { columns: 1; }
+            .container { margin: 10px; }
+            .header-corporate { padding: 20px; }
+            .content-section { padding: 20px; }
+            .vendor-content { font-size: 12px; }
         }
     </style>
 </head>
@@ -190,13 +233,21 @@
             </div>
         </section>
 
-        <!-- Estado de Proveedores -->
+        <!-- Estado de Proveedores MEJORADO -->
         <section class="content-section">
             <h2 class="section-title">Estado Detallado por Proveedor ICT</h2>
-            <div class="vendor-details">{{DETALLES_POR_VENDOR_TEXTO}}</div>
+            
+            <div class="vendor-details-improved">
+                <div class="vendor-header">
+                    📊 ESTADO OPERACIONAL POR FABRICANTE
+                </div>
+                <pre class="vendor-content">{{DETALLES_POR_VENDOR_TEXTO}}</pre>
+            </div>
+            
             <p style="font-size: 12px; color: #6c757d; margin-top: 15px;">
                 <strong>Fuente:</strong> Páginas de estado oficiales | 
-                <strong>Alcance:</strong> {{NUM_PROVEEDORES}} proveedores críticos
+                <strong>Alcance:</strong> {{NUM_PROVEEDORES}} proveedores críticos |
+                <strong>Actualización:</strong> Tiempo real con conversión a UTC
             </p>
         </section>
 
