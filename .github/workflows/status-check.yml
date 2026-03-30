@@ -30,9 +30,8 @@ on:
         default: ""
         type: string
   schedule:
-    # 08:30 Madrid (CEST/CET)
+    # 08:30 Madrid (CEST, UTC+2) / 07:30 Madrid (CET, UTC+1)
     - cron: "30 6 * * *"
-    - cron: "30 7 * * *"
 
 concurrency:
   group: dora-status-${{ github.ref }}
