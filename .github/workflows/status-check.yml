@@ -30,9 +30,9 @@ on:
         default: ""
         type: string
   schedule:
-    # 08:30 Madrid (CEST/CET)
-    - cron: "30 6 * * *"
-    - cron: "30 7 * * *"
+    # 09:00 Madrid (CEST=UTC+2 → 7:00 UTC; CET=UTC+1 → 8:00 UTC)
+    - cron: "0 7 * * *"
+    - cron: "0 8 * * *"
 
 concurrency:
   group: dora-status-${{ github.ref }}
@@ -44,6 +44,7 @@ jobs:
     runs-on: ubuntu-latest
     permissions:
       contents: read
+      actions: write
     strategy:
       fail-fast: false
       matrix:
@@ -51,6 +52,19 @@ jobs:
 
     steps:
       - uses: actions/checkout@v4
+
+      - name: Verificar hora local en España
+        if: github.event_name == 'schedule'
+        run: |
+          HORA_MADRID=$(TZ="Europe/Madrid" date +%H)
+          echo "La hora en Madrid es: $HORA_MADRID"
+          if [ "$HORA_MADRID" != "09" ]; then
+            echo "No son las 9 AM en España. Cancelando esta ejecución..."
+            gh run cancel ${{ github.run_id }}
+            sleep 10
+          fi
+        env:
+          GH_TOKEN: ${{ github.token }}
 
       - uses: actions/setup-python@v5
         with:
