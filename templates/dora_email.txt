@@ -31,7 +31,7 @@ CUMPLIMIENTO NORMATIVO
 ✓ DORA Article 28 - Monitoreo terceros: CUMPLE
 Próxima revisión: {{FECHA_SIGUIENTE_REPORTE}} (UTC)
 
-━━━━━━━━━━━━━���━━━━━━━━━━━━━━━━━━━━━━━━
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 Fuentes monitorizadas:
 {{LISTA_FUENTES_TXT}}
 
