@@ -58,7 +58,7 @@ ACTIVE_STATUS_PATTERN = re.compile(
 
 def now_utc_str():
     # Para mensajes legacy (con sufijo "UTC")
-    return datetime.utcnow().strftime("%Y-%m-%d %H:%M UTC")
+    return datetime.now(timezone.utc).strftime("%Y-%m-%d %H:%M UTC")
 
 def _now_utc_clean():
     # Para export JSON (el digest añade 'UTC' al render)
@@ -193,7 +193,7 @@ def today_header_strings():
     Genera múltiples formatos de fecha para hoy, para capturar diferentes
     formatos que Imperva podría usar.
     """
-    now = datetime.utcnow()
+    now = datetime.now(timezone.utc)
     formats = set()
     
     # Formato abreviado con cero: "Feb 01, 2026"

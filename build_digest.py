@@ -74,7 +74,7 @@ def build_summary(vendors_data):
 
 def render_outputs(vendors_data):
     email_tmpl, digest_tmpl = load_templates()
-    now_utc = datetime.utcnow()
+    now_utc = datetime.now(timezone.utc)
     ctx = {
         "title": "Daily Vendor Status",
         "generated_at_local": _dt_local_madrid(now_utc),
@@ -100,7 +100,7 @@ def render_outputs(vendors_data):
 
 def send_outputs(html_body: str, text_body: str):
     # 1) Email (Gmail SMTP) — usa secrets en GitHub
-    subj = f"Daily Vendor Status — {datetime.utcnow().strftime('%Y-%m-%d')}"
+    subj = f"Daily Vendor Status — {datetime.now(timezone.utc).strftime('%Y-%m-%d')}"
     send_email_smtp(subject=subj, html_body=html_body, text_body=text_body)
     # 2) Telegram/Teams — digest texto
     send_telegram(text_body)

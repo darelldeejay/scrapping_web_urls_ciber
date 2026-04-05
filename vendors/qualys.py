@@ -59,7 +59,7 @@ def _collapse_ws(s: str) -> str:
     return re.sub(r"\s+", " ", s or "").strip()
 
 def now_utc_str() -> str:
-    return datetime.utcnow().strftime("%Y-%m-%d %H:%M UTC")
+    return datetime.now(timezone.utc).strftime("%Y-%m-%d %H:%M UTC")
 
 def _now_utc_clean() -> str:
     """Para export JSON: sin el sufijo 'UTC'; el renderer lo añadirá si procede."""
@@ -151,7 +151,7 @@ def _parse_date_range(date_text: str, context_node):
         if md:
             right = f"{md.group(0)}, {right}"
 
-    year = _find_year_context(context_node) or datetime.utcnow().year
+    year = _find_year_context(context_node) or datetime.now(timezone.utc).year
     left_s  = _build_dt_strings(left, year)
     right_s = _build_dt_strings(right, year)
     sdt = _parse_with_tz_abbrev(left_s, tzabbr)  if left_s  else None

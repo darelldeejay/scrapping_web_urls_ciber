@@ -44,7 +44,7 @@ DATE_REGEX_LOOSE = rf"({MONTHS})\s+\d{{1,2}}(?:,\s*\d{{4}})?(?:\s*,?\s*\d{{1,2}}
 STATUS_TOKENS = ["Resolved", "Mitigated", "Monitoring", "Identified", "Investigating", "Degraded", "Update"]
 
 def now_utc_str() -> str:
-    return datetime.utcnow().strftime("%Y-%m-%d %H:%M UTC")
+    return datetime.now(timezone.utc).strftime("%Y-%m-%d %H:%M UTC")
 
 def _now_utc_clean() -> str:
     return datetime.now(timezone.utc).strftime("%Y-%m-%d %H:%M")
@@ -343,7 +343,7 @@ def analizar_netskope(driver) -> Tuple[List[dict], List[dict]]:
     ]
 
     # Filtrar 'pasados' a 15 días
-    now = datetime.utcnow().replace(tzinfo=timezone.utc)
+    now = datetime.now(timezone.utc)
     cutoff = now - timedelta(days=LOOKBACK_DAYS)
 
     def in_lookback(inc):
