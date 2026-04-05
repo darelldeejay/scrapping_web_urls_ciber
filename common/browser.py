@@ -27,7 +27,7 @@ def make_driver(headless: bool = True, page_load_timeout: int = 60) -> webdriver
     # User-Agent configurable (algunos sites son sensibles)
     ua = os.getenv("SCRAPER_UA") or (
         "Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 "
-        "(KHTML, like Gecko) Chrome/123.0.0.0 Safari/537.36"
+        "(KHTML, like Gecko) Chrome/131.0.0.0 Safari/537.36"
     )
     opts.add_argument(f"--user-agent={ua}")
 

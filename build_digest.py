@@ -1,4 +1,34 @@
 # build_digest.py
+#
+# ============================================================
+# DEPRECATED — ARCHIVO LEGADO ROTO — NO USAR EN PRODUCCIÓN
+# ============================================================
+#
+# Este archivo es código legado que YA NO FORMA PARTE del flujo
+# activo de producción. Presenta los siguientes problemas:
+#
+#   1. Importa `common.mailer` (send_email_smtp) que NO EXISTE
+#      en el repositorio → falla inmediatamente al intentar ejecutarse.
+#
+#   2. El flujo de producción actual utiliza en su lugar:
+#        - run_vendor.py           (scraping por vendor + export JSON)
+#        - scripts/build_digest_data.py  (agrega JSONs → digest_data.json)
+#        - run_digest.py           (renderiza plantillas y envía a canales)
+#
+#   3. Consulta el README.md para el flujo correcto.
+#
+# SE CONSERVA ÚNICAMENTE COMO REFERENCIA HISTÓRICA.
+# ============================================================
+
+import warnings
+warnings.warn(
+    "build_digest.py está DEPRECADO y roto (common.mailer no existe). "
+    "Usa el flujo moderno: run_vendor.py → scripts/build_digest_data.py → run_digest.py. "
+    "Ver README.md para más detalles.",
+    DeprecationWarning,
+    stacklevel=1,
+)
+
 import os
 import importlib
 from datetime import datetime, timezone
