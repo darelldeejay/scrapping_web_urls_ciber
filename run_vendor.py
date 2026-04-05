@@ -1,44 +1,56 @@
 #!/usr/bin/env python3
 # -*- coding: utf-8 -*-
 
+import importlib
+import json
 import os
 import argparse
-import importlib
 from datetime import datetime, timezone
 
-# Arranque Selenium
 from common.browser import make_driver
-from bs4 import BeautifulSoup  # por si algún vendor lo usa internamente
+from common.config import is_valid_slug
 
-def now_utc_str():
+
+def now_utc_str() -> str:
     return datetime.now(timezone.utc).strftime("%Y-%m-%d %H:%M")
 
-def main():
+
+def main() -> None:
     ap = argparse.ArgumentParser(description="Run single vendor or export JSON for digest")
-    ap.add_argument("--vendor", required=True, help="nombre del vendor (slug): aruba, cyberark, ...")
-    ap.add_argument("--export-json", help="ruta de salida JSON con resumen para digest")
-    ap.add_argument("--headless", action="store_true", default=True)
+    ap.add_argument("--vendor", required=True, help="vendor slug: aruba, cyberark, ...")
+    ap.add_argument("--export-json", help="output JSON path for digest")
+    ap.add_argument(
+        "--headless",
+        action=argparse.BooleanOptionalAction,
+        default=True,
+        help="run Chrome headless (default: True); use --no-headless to show the browser",
+    )
     args = ap.parse_args()
 
     slug = args.vendor.strip().lower()
+
+    # Security: validate slug before using it in importlib / file paths
+    if not is_valid_slug(slug):
+        raise SystemExit(f"Invalid vendor slug: {slug!r}")
+
     driver = make_driver(headless=args.headless)
 
-    # Carga módulo del vendor
+    # Load vendor module
     try:
         mod = importlib.import_module(f"vendors.{slug}")
     except Exception as e:
         driver.quit()
         raise SystemExit(f"No se pudo importar vendors.{slug}: {e}")
 
-    # 1) Intentar collect() nativo del vendor
+    # 1) Try vendor's own collect()
     data = None
     try:
         if hasattr(mod, "collect") and callable(getattr(mod, "collect")):
-            data = mod.collect(driver)  # debe devolver dict estándar
+            data = mod.collect(driver)
     except Exception:
         data = None
 
-    # 2) Fallback common
+    # 2) Fallback to common collector
     if data is None:
         try:
             from common.fallback_collectors import get_collector
@@ -51,7 +63,7 @@ def main():
             except Exception:
                 data = None
 
-    # 3) Último recurso: mínimo
+    # 3) Last-resort minimal stub
     if not isinstance(data, dict):
         data = {
             "name": slug.title(),
@@ -63,7 +75,7 @@ def main():
 
     driver.quit()
 
-    # Normalización mínima
+    # Normalise list fields
     for k in ("component_lines", "incidents_lines"):
         v = data.get(k)
         if isinstance(v, str):
@@ -74,20 +86,21 @@ def main():
     data.setdefault("name", slug.title())
     data.setdefault("timestamp_utc", now_utc_str())
 
-    # Export JSON si lo piden
     if args.export_json:
-        import json
         out = args.export_json
-        os.makedirs(os.path.dirname(out), exist_ok=True)
+        parent = os.path.dirname(out)
+        if parent:
+            os.makedirs(parent, exist_ok=True)
         with open(out, "w", encoding="utf-8") as f:
             json.dump(data, f, ensure_ascii=False, indent=2)
     else:
-        # Camino “run” clásico: imprime un pequeño resumen a stdout (no notifica)
+        # Classic run path: print a brief summary to stdout (no notifications)
         print(f"[{data.get('name')}] {data.get('timestamp_utc')} UTC")
         for ln in (data.get("component_lines") or []):
             print(ln)
         for ln in (data.get("incidents_lines") or []):
             print(ln)
+
 
 if __name__ == "__main__":
     main()
