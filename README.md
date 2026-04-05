@@ -48,6 +48,7 @@ common/
   browser.py      # arranque Selenium (Chrome headless)
   notify.py       # envío Telegram/Teams
   format.py       # helpers de formato comunes (cabeceras, listas, etc.)
+  templates.py    # utilidades de renderizado de plantillas (load/render/chunk)
 vendors/
   aruba.py        # Aruba Central
   cyberark.py     # CyberArk Privilege Cloud
@@ -64,9 +65,12 @@ templates/
   dora_email.html # plantilla de correo en HTML (pegable)
 run_vendor.py     # orquesta ejecución por vendor (+ export JSON)
 run_digest.py     # renderiza plantillas y envía a canales
+build_digest.py   # LEGACY/DEPRECATED — no usar (ver nota abajo)
 .github/workflows/status-check.yml  # pipeline CI
 requirements.txt
 ```
+
+> ⚠️ **`build_digest.py` (legado)**: Este archivo es una versión anterior del digest, importa `common.mailer` que **no existe** en el repositorio actual. No se usa en producción. El flujo real es `scripts/build_digest_data.py` + `run_digest.py`.
 
 ---
 
@@ -129,6 +133,8 @@ Workflow: `.github/workflows/status-check.yml`
 
 > `run_digest.py` rellena automáticamente los placeholders. Si un valor no está, deja vacío sin romper.
 
+> **Nota sobre contadores** (`INC_NUEVOS_HOY`, `INC_RESUELTOS_HOY`, etc.): estos valores son **heurísticos** calculados por `scripts/build_digest_data.py` mediante búsqueda de palabras clave (p.ej. "Resolved", "Investigating"). Son apropiados para un resumen ejecutivo pero **no garantizan un conteo exacto** — su propósito es dar una indicación rápida del estado operativo.
+
 ---
 
 ## 🧪 Ejecución local (opcional)
@@ -151,6 +157,7 @@ NOTIFY_DRY_RUN=true python run_digest.py   --text-template templates/dora_email.
 **Flags útiles**
 - `NOTIFY_DRY_RUN=true` → previsualiza sin enviar
 - `SAVE_HTML=1` en el job de vendors → guarda el HTML descargado para depurar parsers
+- `--no-headless` en `run_vendor.py` → muestra la ventana del navegador (útil para depurar selectores localmente)
 
 ---
 
