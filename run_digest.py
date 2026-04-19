@@ -5,67 +5,29 @@ import os
 import json
 import argparse
 from datetime import datetime, timezone
-from typing import Dict, Optional, List, Tuple
-import re
+from typing import Dict, List, Optional
+
 import requests
 
-# ---------------- Utilidades ----------------
+from common.config import TELEGRAM_CHUNK_LIMIT, TELEGRAM_SEND_TIMEOUT, TEAMS_SEND_TIMEOUT
+from common.templates import (
+    SUBJECT_RE,
+    load_text_template,
+    load_html_template,
+    render_placeholders,
+    wrap_codeblock,
+    chunk_text,
+)
+
+# ---------------- Utilities ----------------
+
 
 def is_truthy_env(name: str) -> bool:
     return os.getenv(name, "").strip().lower() in ("1", "true", "yes", "y", "on")
 
-SUBJECT_RE = re.compile(r"^\s*Asunto\s*:\s*(.+)\s*$", re.IGNORECASE)
-TITLE_RE = re.compile(r"<title>(.*?)</title>", re.IGNORECASE | re.DOTALL)
-PLACEHOLDER_RE = re.compile(r"{{\s*([A-Za-z0-9_]+)\s*}}")
-
-def load_text_template(path: str) -> Tuple[Optional[str], str]:
-    with open(path, "r", encoding="utf-8") as f:
-        raw = f.read()
-    subject = None
-    lines = raw.splitlines()
-    body_start = 0
-    for i, line in enumerate(lines):
-        m = SUBJECT_RE.match(line)
-        if m:
-            subject = m.group(1).strip()
-            body_start = i + 1
-            break
-    while body_start < len(lines) and lines[body_start].strip() == "":
-        body_start += 1
-    body = "\n".join(lines[body_start:]) if body_start < len(lines) else ""
-    return subject, body
-
-def load_html_template(path: str) -> Tuple[Optional[str], str]:
-    with open(path, "r", encoding="utf-8") as f:
-        html = f.read()
-    m = TITLE_RE.search(html)
-    subject = m.group(1).strip() if m else None
-    return subject, html
-
-def render_placeholders(template: str, data: Dict[str, str]) -> str:
-    def _rep(m):
-        key = m.group(1)
-        return str(data.get(key, m.group(0)))
-    return PLACEHOLDER_RE.sub(_rep, template)
-
-def wrap_codeblock(lang: str, content: str) -> str:
-    safe = content.replace("```", "``\u200b`")
-    return f"```{lang}\n{safe}\n```"
-
-def chunk_text(text: str, limit: int = 3900):
-    if len(text) <= limit:
-        yield text
-        return
-    start = 0
-    while start < len(text):
-        end = min(start + limit, len(text))
-        nl = text.rfind("\n", start, end)
-        if nl == -1 or nl <= start:
-            nl = end
-        yield text[start:nl]
-        start = nl
 
 # ---------------- Data helpers ----------------
+
 
 def load_data(path: Optional[str]) -> Dict[str, str]:
     if not path:
@@ -73,6 +35,7 @@ def load_data(path: Optional[str]) -> Dict[str, str]:
     with open(path, "r", encoding="utf-8") as f:
         data = json.load(f)
     return {k: ("" if v is None else str(v)) for k, v in data.items()}
+
 
 def _saludo_linea(now_utc: datetime) -> str:
     h = int(now_utc.strftime("%H"))
@@ -82,12 +45,16 @@ def _saludo_linea(now_utc: datetime) -> str:
         return "Buenas tardes,"
     return "Buenas noches,"
 
+
 def inject_defaults(data: Dict[str, str]) -> Dict[str, str]:
     now_utc = datetime.now(timezone.utc)
     defaults = {
         "FECHA_UTC": now_utc.strftime("%Y-%m-%d"),
         "HORA_MUESTREO_UTC": now_utc.strftime("%H:%M"),
-        "VENTANA_UTC": f"{(now_utc.replace(hour=0, minute=0, second=0, microsecond=0)).strftime('%Y-%m-%d 00:00')}–{now_utc.strftime('%Y-%m-%d %H:%M')}",
+        "VENTANA_UTC": (
+            f"{(now_utc.replace(hour=0, minute=0, second=0, microsecond=0)).strftime('%Y-%m-%d 00:00')}"
+            f"–{now_utc.strftime('%Y-%m-%d %H:%M')}"
+        ),
         "NUM_PROVEEDORES": data.get("NUM_PROVEEDORES", ""),
         "INC_NUEVOS_HOY": data.get("INC_NUEVOS_HOY", ""),
         "INC_ACTIVOS": data.get("INC_ACTIVOS", ""),
@@ -112,7 +79,9 @@ def inject_defaults(data: Dict[str, str]) -> Dict[str, str]:
     }
     return {**defaults, **data}
 
-# ---------------- Senders (honran DRY-RUN) ----------------
+
+# ---------------- Senders (honour DRY-RUN) ----------------
+
 
 def env_or_raise(name: str) -> str:
     val = os.getenv(name)
@@ -120,60 +89,80 @@ def env_or_raise(name: str) -> str:
         raise RuntimeError(f"Falta la variable de entorno requerida: {name}")
     return val
 
+
 def send_telegram(markdown: str, subject: Optional[str], dry_run: bool) -> None:
     if dry_run:
         return
     token = env_or_raise("TELEGRAM_BOT_TOKEN")
     chat_id = env_or_raise("TELEGRAM_USER_ID")
     url = f"https://api.telegram.org/bot{token}/sendMessage"
-    for chunk in chunk_text(markdown, limit=3900):
-        r = requests.post(url, json={"chat_id": chat_id, "text": chunk}, timeout=30)
+    for chunk in chunk_text(markdown, limit=TELEGRAM_CHUNK_LIMIT):
+        r = requests.post(url, json={"chat_id": chat_id, "text": chunk}, timeout=TELEGRAM_SEND_TIMEOUT)
         if r.status_code != 200:
             msg = r.text
             if len(msg) > 600:
                 msg = msg[:600] + "...(truncado)"
             raise RuntimeError(f"Telegram error ({r.status_code}): {msg}")
 
+
 def send_teams(markdown: str, subject: Optional[str], dry_run: bool) -> None:
     if dry_run:
         return
     webhook = env_or_raise("TEAMS_WEBHOOK_URL")
     title = subject or "DORA Daily Digest"
-    card = {"@type": "MessageCard","@context": "https://schema.org/extensions",
-            "summary": title,"themeColor": "2B579A","title": title,"text": markdown}
-    r = requests.post(webhook, json=card, timeout=30)
+    card = {
+        "@type": "MessageCard",
+        "@context": "https://schema.org/extensions",
+        "summary": title,
+        "themeColor": "2B579A",
+        "title": title,
+        "text": markdown,
+    }
+    r = requests.post(webhook, json=card, timeout=TEAMS_SEND_TIMEOUT)
     if r.status_code >= 300:
         msg = r.text
         if len(msg) > 600:
             msg = msg[:600] + "...(truncado)"
         raise RuntimeError(f"Teams webhook error ({r.status_code}): {msg}")
 
+
 # ---------------- Preview writers ----------------
 
-def write_preview(preview_dir: str, subject: str, html_block_md: str, html_body: str, text_body: str) -> None:
+
+def write_preview(
+    preview_dir: str,
+    subject: str,
+    html_block_md: str,
+    html_body: str,
+    text_body: str,
+) -> None:
     os.makedirs(preview_dir, exist_ok=True)
-    # Asunto
     with open(os.path.join(preview_dir, "subject.txt"), "w", encoding="utf-8") as f:
         f.write(subject)
-    # HTML (bloque MD y archivo .html real)
     with open(os.path.join(preview_dir, "html_block.md"), "w", encoding="utf-8") as f:
         f.write(html_block_md)
     with open(os.path.join(preview_dir, "email.html"), "w", encoding="utf-8") as f:
         f.write(html_body)
-    # TXT SIEMPRE (como antes)
     with open(os.path.join(preview_dir, "text_body.txt"), "w", encoding="utf-8") as f:
         f.write(text_body)
 
+
 # ---------------- Main ----------------
 
-def main():
-    ap = argparse.ArgumentParser(description="Enviar plantillas DORA como mensaje 'pegable' a Telegram/Teams")
+
+def main() -> None:
+    ap = argparse.ArgumentParser(
+        description="Enviar plantillas DORA como mensaje 'pegable' a Telegram/Teams"
+    )
     ap.add_argument("--text-template", default="templates/dora_email.txt")
     ap.add_argument("--html-template", default="templates/dora_email.html")
     ap.add_argument("--data")
     ap.add_argument("--channels", default="telegram,teams", help="telegram,teams,both,none")
-    ap.add_argument("--also-text", action="store_true")  # se mantiene por compatibilidad, pero ya no afecta al preview
-    ap.add_argument("--preview-out", help="Directorio donde guardar previsualización (subject/html/text). Implica no enviar.")
+    ap.add_argument("--also-text", action="store_true")  # kept for compatibility, no longer affects preview
+    ap.add_argument(
+        "--preview-out",
+        help="Directory to write preview files (subject/html/text). Implies no sending.",
+    )
     args = ap.parse_args()
 
     data = inject_defaults(load_data(args.data))
@@ -186,35 +175,33 @@ def main():
     subject = render_placeholders(data.get("SUBJECT") or text_subject or html_subject or "DORA Daily Digest", data)
     html_block = wrap_codeblock("html", html_body)
 
-    # DRY-RUN si preview_out o env NOTIFY_DRY_RUN
+    # DRY-RUN if preview_out is set or NOTIFY_DRY_RUN env var is truthy
     dry_run = bool(args.preview_out) or is_truthy_env("NOTIFY_DRY_RUN")
 
-    # Selección de canales
+    # Channel selection
     selected = {c.strip().lower() for c in args.channels.split(",") if c.strip()}
     if "both" in selected:
         selected = {"telegram", "teams"}
     if "none" in selected:
         selected = set()
 
-    # Previsualización (no envío)
     if dry_run:
         preview_dir = args.preview_out or ".github/out/preview"
-        # Siempre guardamos el cuerpo TXT (como estaba), y añadimos el HTML real.
         write_preview(preview_dir, subject, html_block, html_body, text_body)
         print(f"[preview] Escribí previsualización en: {preview_dir}")
         return
 
     errors: List[str] = []
 
-    # Telegram → SOLO versión texto (como acordado)
+    # Telegram → plain-text version
     if "telegram" in selected:
         try:
-            for chunk in chunk_text(f"{subject}\n\n{text_body}", limit=3900):
+            for chunk in chunk_text(f"{subject}\n\n{text_body}", limit=TELEGRAM_CHUNK_LIMIT):
                 send_telegram(chunk, subject=subject, dry_run=False)
         except Exception as e:
             errors.append(f"Telegram: {e}")
 
-    # Teams → SOLO bloque HTML (como acordado)
+    # Teams → HTML block version
     if "teams" in selected:
         try:
             payload = f"**{subject}**\n\n{html_block}"
@@ -224,6 +211,7 @@ def main():
 
     if errors:
         raise SystemExit(" | ".join(errors))
+
 
 if __name__ == "__main__":
     main()
