@@ -91,11 +91,20 @@ jobs:
         id: export
         run: |
           echo "🔄 Iniciando scraping de ${{ matrix.vendor }}..."
+          echo "   Timeout: 180s (3 min en CI para conexiones lentas)"
+          
+          # Capturar timing
+          START=$(date +%s)
+          
           if python run_vendor.py --vendor ${{ matrix.vendor }} --export-json ".github/out/vendors/${{ matrix.vendor }}.json"; then
-            echo "✅ ${{ matrix.vendor }} completado exitosamente"
+            END=$(date +%s)
+            ELAPSED=$((END - START))
+            echo "✅ ${{ matrix.vendor }} completado exitosamente en ${ELAPSED}s"
             echo "success=true" >> $GITHUB_OUTPUT
           else
-            echo "❌ Error en ${{ matrix.vendor }}"
+            END=$(date +%s)
+            ELAPSED=$((END - START))
+            echo "❌ Error en ${{ matrix.vendor }} después de ${ELAPSED}s"
             echo "success=false" >> $GITHUB_OUTPUT
             exit 1
           fi
@@ -106,10 +115,14 @@ jobs:
           if [ -f "$FILE" ]; then
             SIZE=$(stat -c%s "$FILE" 2>/dev/null || stat -f%z "$FILE" 2>/dev/null || echo "unknown")
             echo "✅ JSON creado: $FILE (tamaño: $SIZE bytes)"
-            head -c 200 "$FILE"
+            
+            # Mostrar primeros datos para verificar que NO está vacío
+            echo "📋 Primeras líneas del JSON:"
+            head -c 300 "$FILE" || echo "No se pudo leer"
             echo ""
           else
-            echo "❌ ERROR: No se creó $FILE"
+            echo "❌ ERROR CRÍTICO: No se creó $FILE"
+            echo "   El vendor ${{ matrix.vendor }} falló completamente"
             exit 1
           fi
 

@@ -8,11 +8,21 @@ from selenium.webdriver.chrome.options import Options
 from selenium.webdriver.support.ui import WebDriverWait
 from selenium.common.exceptions import TimeoutException, WebDriverException
 
-def make_driver(headless: bool = True, page_load_timeout: int = 60) -> webdriver.Chrome:
+def make_driver(headless: bool = True, page_load_timeout: int = None) -> webdriver.Chrome:
     """
     Crea un Chrome para CI (GitHub Actions) usando Selenium Manager.
     No requiere instalar Chrome/Chromedriver manualmente.
+    
+    En CI, los timeouts son más generosos (hasta 3 minutos) porque:
+    - Conexión de red del runner es limitada
+    - Algunos sitios de status responden lentamente
+    - Chrome en headless tarda más en iniciar
     """
+    # Timeouts adaptivos: más altos en CI que localmente
+    is_ci = os.getenv("CI") == "true" or os.getenv("GITHUB_ACTIONS") == "true"
+    if page_load_timeout is None:
+        page_load_timeout = 180 if is_ci else 60  # 3 min en CI, 1 min local
+    
     opts = Options()
     if headless:
         # Headless moderno (más estable en CI)
@@ -34,10 +44,15 @@ def make_driver(headless: bool = True, page_load_timeout: int = 60) -> webdriver
     driver = webdriver.Chrome(options=opts)  # Selenium Manager resuelve binarios compatibles
     try:
         driver.set_page_load_timeout(page_load_timeout)
-        driver.set_script_timeout(30)
+        driver.set_script_timeout(120 if is_ci else 30)  # Script timeout también más alto en CI
         driver.implicitly_wait(0)
     except Exception:
         pass
+    
+    # Debug logging en CI
+    if is_ci:
+        print(f"[BROWSER] CI mode detectado: page_load_timeout={page_load_timeout}s, script_timeout={120}s", flush=True)
+    
     return driver
 
 # Compatibilidad retro para vendors que aún importan start_driver

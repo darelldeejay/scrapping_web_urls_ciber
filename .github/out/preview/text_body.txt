@@ -1,0 +1,153 @@
+Buenos días,
+
+BANCO PICHINCHA - DORA
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+MONITOREO DE TERCEROS ICT
+2026-04-19 | 10:48 (UTC)
+
+┌─────────────────────────────────────┐
+│           RESUMEN EJECUTIVO                 │
+├─────────────────────────────────────┤
+│ Proveedores monitorizados: 8     │
+│ Incidentes nuevos hoy:    3       │
+│ Incidentes activos:       0          │
+│ Incidentes resueltos hoy: 4    │
+│ Mantenimientos hoy:       5   │
+└─────────────────────────────────────┘
+
+EVALUACIÓN DE RIESGO DORA
+Incidencias en curso en una o más plataformas. Revisión recomendada.
+
+ESTADO POR PROVEEDOR ICT
+=== AKAMAI (GUARDICORE) ===
+Akamai (Guardicore) - Status
+2026-04-19 10:41 UTC
+
+Component status
+- Content Delivery Operational
+- App & Network Security Operational
+- Enterprise Security Operational
+- Data Services Operational
+- Configuration Operational
+- Customer Service, Documentation and Community Operational
+
+Incidents today
+No incidents reported today.
+
+=== ARUBA CENTRAL ===
+Aruba Central - Status
+2026-04-19 10:40 UTC
+
+Component status
+- All components Operational
+
+Incidents today
+No incidents reported today.
+
+=== CYBERARK PRIVILEGE CLOUD ===
+CyberArk Privilege Cloud - Status
+2026-04-19 10:41 UTC
+
+Component status
+- (no data)
+
+Incidents today
+No incidents reported today.
+
+=== IMPERVA ===
+Imperva - Status
+2026-04-19 10:40 UTC
+
+Component status
+- Coming Soon: Under Maintenance
+- Tokyo, Japan (NRT) - May 2026: Under Maintenance
+- Amsterdam, Netherlands (RTM) - May 2026: Under Maintenance
+- Frankfurt, Germany (HHN) - April 2026: Under Maintenance
+- Singapore (XSP) - May 2026: Under Maintenance
+
+Incidents today
+- Incident
+- update — [PPNG-3294] - Scheduled update to the Cloud Security Console – April 19, 2026
+- [ICM-4875] Planned maintenance on the Imperva data center in New York 2, NY [POPs: 2026, 4875, ICM, UTC]
+- [ICM-4904] Planned maintenance on the Imperva data center in Houston, TX [POPs: 2026, 4904, ICM, UTC]
+- [ICM-4910] Essential Maintenance on the Imperva data center in Hanoi, Vietnam [POPs: 2026, 4910, ICM, UTC]
+- update — [UM-13107] - Scheduled update to the Cloud Security Console – April 26, 2026
+- [ICM-4906] Planned Maintenance on the Imperva data center in Paris 2, France [POPs: 2026, 4906, ICM, UTC]
+
+=== NETSKOPE ===
+Netskope - Estado de Incidentes
+2026-04-19 10:39 UTC
+
+Component status
+- All components Operational
+
+Incidents today
+Incidentes activos
+- No hay incidentes activos reportados.
+Últimos 15 días (resueltos)
+- (no data)
+
+=== PROOFPOINT ===
+Proofpoint - Estado de Incidentes
+2026-04-19 10:40 UTC
+
+Component status
+- All components Operational
+
+Incidents today
+Incidentes activos
+- No hay incidentes activos reportados.
+
+=== QUALYS ===
+Qualys - Estado de Incidentes
+2026-04-19 10:40 UTC
+
+Component status
+- (no data)
+
+Incidents today
+Histórico (meses visibles en la página)
+1. EU Platform 2: Delay in VM Scan Processing [IM-12595] (https://status.qualys.com/incidents/968bp3gydmf0)
+   Estado: Resolved · Inicio: 2026-04-16 23:43 UTC · Fin: 2026-04-17 09:50 UTC
+2. EU Platform 2: Qualys UI Login Impacted [IM-12553]
+   Estado: Resolved · Inicio: 2026-03-24 03:05 UTC · Fin: 2026-03-24 06:23 UTC
+3. Platform: US_POD1/2/3, EU_POD1/2, IN_POD1, CA_POD1: Tag Based Queries Not Returning Expected Assets(IM-12549) (https://status.qualys.com/incidents/shjmjqtr2l9n)
+   Estado: Resolved · Inicio: 2026-03-18 03:11 UTC · Fin: 2026-03-22 12:16 UTC
+4. EU2 : Observing issue with VM/PA scheduled scans and reports (IM-12524) (https://status.qualys.com/incidents/9sm72pyhqqd2)
+   Estado: Resolved · Inicio: 2026-02-28 08:08 UTC · Fin: 2026-02-28 13:43 UTC
+
+=== TREND MICRO ===
+Trend Micro - Status
+2026-04-19 10:41 UTC
+
+Component status
+- All components Operational
+
+[Trend Cloud One]
+Incidents today
+- No incidents reported today.
+[Trend Vision One]
+Incidents today
+- No incidents reported today.
+
+IMPACTO OPERACIONAL
+• Impacto cliente: Sí (potencial)
+• Acción requerida: Comunicación interna breve; monitorización reforzada; revisión de alertas SIEM/observabilidad; seguimiento con el/los fabricante(s) hasta resolución.
+
+CUMPLIMIENTO NORMATIVO
+✓ DORA Article 28 - Monitoreo terceros: CUMPLE
+Próxima revisión: 2026-04-20 (UTC)
+
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+Fuentes monitorizadas:
+- https://centralstatus.arubanetworking.hpe.com/
+- https://privilegecloud-service-status.cyberark.com/
+- https://www.akamaistatus.com/
+- https://status.imperva.com/
+- https://trustportal.netskope.com/incidents
+- https://proofpoint.my.site.com/community/s/proofpoint-current-incidents
+- https://status.qualys.com/history?filter=8f7fjwhmd4n0
+- https://status.trendmicro.com/
+
+Para escalamiento o consultas técnicas, contactar al equipo SOC.
+Ventana de observación: 2026-04-19 00:00–2026-04-19 10:44 | Fuente: Páginas oficiales fabricantes

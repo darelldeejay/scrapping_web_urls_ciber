@@ -1,0 +1,16 @@
+{
+  "name": "Akamai (Guardicore)",
+  "timestamp_utc": "2026-04-19 10:41",
+  "component_lines": [
+    "Content Delivery Operational",
+    "App & Network Security Operational",
+    "Enterprise Security Operational",
+    "Data Services Operational",
+    "Configuration Operational",
+    "Customer Service, Documentation and Community Operational"
+  ],
+  "incidents_lines": [
+    "No incidents reported today."
+  ],
+  "overall_ok": true
+}
