@@ -182,7 +182,8 @@ def main():
 
     text_body = render_placeholders(text_body_tpl, data)
     html_body = render_placeholders(html_tpl, data)
-    subject = data.get("SUBJECT") or text_subject or html_subject or "DORA Daily Digest"
+    # Renderizar el subject también (no solo text_body y html_body)
+    subject = render_placeholders(data.get("SUBJECT") or text_subject or html_subject or "DORA Daily Digest", data)
     html_block = wrap_codeblock("html", html_body)
 
     # DRY-RUN si preview_out o env NOTIFY_DRY_RUN

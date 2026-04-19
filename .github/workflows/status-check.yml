@@ -6,7 +6,7 @@ on:
       send_channels:
         description: "Dónde enviar"
         required: true
-        default: "both"   # telegram, teams, both, none
+        default: "both"
         type: choice
         options: [none, telegram, teams, both]
       dry_run:
@@ -30,7 +30,8 @@ on:
         default: ""
         type: string
   schedule:
-    # 09:00 Madrid (CEST=UTC+2 → 7:00 UTC; CET=UTC+1 → 8:00 UTC)
+    # 🔴 CRON: Se ejecuta automáticamente a las 09:00 Madrid (UTC+1 o +2)
+    # UTC times: 7:00 (invierno CET), 6:00 (verano CEST)
     - cron: "0 6 * * *"
     #- cron: "0 7 * * *"
     #- cron: "0 8 * * *"
@@ -38,6 +39,12 @@ on:
 concurrency:
   group: dora-status-${{ github.ref }}
   cancel-in-progress: true
+
+env:
+  # Valores por defecto para CRON (se sobrescribirán en manual si es necesario)
+  # En schedule, inputs NO están disponibles, así que usamos env directamente
+  DEFAULT_SEND_CHANNELS: "both"
+  DEFAULT_DRY_RUN: "false"        # CRON ENVÍA DE VERDAD (no preview)
 
 jobs:
   vendors:
@@ -81,8 +88,30 @@ jobs:
 
       # ⛔️ Ya NO enviamos mensajes por vendor; solo exportamos JSON
       - name: Export ${{ matrix.vendor }} to JSON (no notify)
+        id: export
         run: |
-          python run_vendor.py --vendor ${{ matrix.vendor }} --export-json ".github/out/vendors/${{ matrix.vendor }}.json" || true
+          echo "🔄 Iniciando scraping de ${{ matrix.vendor }}..."
+          if python run_vendor.py --vendor ${{ matrix.vendor }} --export-json ".github/out/vendors/${{ matrix.vendor }}.json"; then
+            echo "✅ ${{ matrix.vendor }} completado exitosamente"
+            echo "success=true" >> $GITHUB_OUTPUT
+          else
+            echo "❌ Error en ${{ matrix.vendor }}"
+            echo "success=false" >> $GITHUB_OUTPUT
+            exit 1
+          fi
+
+      - name: Verify JSON was created
+        run: |
+          FILE=".github/out/vendors/${{ matrix.vendor }}.json"
+          if [ -f "$FILE" ]; then
+            SIZE=$(stat -c%s "$FILE" 2>/dev/null || stat -f%z "$FILE" 2>/dev/null || echo "unknown")
+            echo "✅ JSON creado: $FILE (tamaño: $SIZE bytes)"
+            head -c 200 "$FILE"
+            echo ""
+          else
+            echo "❌ ERROR: No se creó $FILE"
+            exit 1
+          fi
 
       - name: Upload vendor summary (per-vendor artifact)
         if: always()
@@ -90,7 +119,7 @@ jobs:
         with:
           name: vendor-${{ matrix.vendor }}
           path: .github/out/vendors/${{ matrix.vendor }}.json
-          if-no-files-found: ignore
+          if-no-files-found: warn
           retention-days: 7
 
   digest:
@@ -112,36 +141,105 @@ jobs:
           python -m pip install --upgrade pip
           pip install -r requirements.txt
 
-      - name: Download vendor summaries (merge all)
-        uses: actions/download-artifact@v4
-        with:
-          pattern: vendor-*
-          merge-multiple: true
-          path: .github/out/vendors
-        continue-on-error: true
+      - name: Verify downloaded artifacts
+        id: verify_artifacts
+        run: |
+          echo "📂 Contenido de .github/out/vendors:"
+          ls -lah .github/out/vendors/ 2>/dev/null || echo "⚠️ Carpeta no existe o está vacía"
+          echo ""
+          echo "📊 Conteo de JSONs:"
+          COUNT=$(find .github/out/vendors -name "*.json" 2>/dev/null | wc -l)
+          echo "Total JSONs encontrados: $COUNT"
+          
+          # Listar cada archivo para debug
+          if [ "$COUNT" -gt 0 ]; then
+            echo ""
+            echo "Archivos detectados:"
+            find .github/out/vendors -name "*.json" -exec sh -c 'echo "  - $(basename {}) ($(stat -c%s {} 2>/dev/null || stat -f%z {} 2>/dev/null) bytes)"' \;
+          fi
+          
+          if [ "$COUNT" -eq 0 ]; then
+            echo ""
+            echo "⚠️ CRÍTICO: No hay archivos JSON de vendors"
+            echo "   Esto significa que el job vendors FALLÓ"
+            echo "   Revisa el log del job anterior: vendors → cada vendor"
+          else
+            echo "✅ Se descargaron $COUNT JSONs de vendors"
+          fi
+          
+          # Exportar para siguiente step
+          echo "artifact_count=$COUNT" >> $GITHUB_OUTPUT
 
       - name: Build digest data JSON
         run: |
           python scripts/build_digest_data.py \
             --vendors-dir .github/out/vendors \
             --out .github/out/digest_data.json
+          
+          echo "📄 Contenido de digest_data.json (primeras 300 chars):"
+          head -c 300 .github/out/digest_data.json || echo "❌ No se creó digest_data.json"
 
-      - name: Compute flags
+      - name: Validate digest data (check if vendors had data)
+        id: validate
+        run: |
+          echo "🔍 Validando contenido del digest..."
+          python scripts/validate_digest.py --data .github/out/digest_data.json
+          
+          if [ $? -eq 0 ]; then
+            echo "✅ Digest válido, proceder a enviar"
+            echo "valid=true" >> $GITHUB_OUTPUT
+          else
+            echo "❌ Digest inválido, ABORTANDO envío"
+            echo "valid=false" >> $GITHUB_OUTPUT
+            # NO usamos exit 1 aquí para permitir que el job continúe y reporte
+            # pero la siguiente etapa checará este flag
+          fi
+
+      - name: Compute flags (manual dispatch vs cron)
         id: flags
         run: |
-          CHANNELS="${{ inputs.send_channels }}"
+          # Detectar si es manual (workflow_dispatch) o cron (schedule)
+          TRIGGER="${{ github.event_name }}"
+          echo "🔍 Trigger: $TRIGGER"
+          
+          # Para workflow_dispatch, usar inputs explícitamente
+          # Para schedule, usar defaults robustos
+          if [ "$TRIGGER" = "workflow_dispatch" ]; then
+            echo "📤 Ejecutado MANUAL desde GitHub Actions"
+            CHANNELS="${{ inputs.send_channels }}"
+            DRY="${{ inputs.dry_run }}"
+            ALSO="${{ inputs.also_text }}"
+            IMPACTO="${{ inputs.impacto_override }}"
+            ACCION="${{ inputs.accion_override }}"
+          else
+            echo "🔔 Ejecutado CRON (schedule trigger)"
+            # En cron, usar defaults seguros y explícitos
+            CHANNELS="${{ env.DEFAULT_SEND_CHANNELS }}"
+            DRY="${{ env.DEFAULT_DRY_RUN }}"
+            ALSO="false"
+            IMPACTO=""
+            ACCION=""
+          fi
+          
+          # Validar que no estén vacíos (fallback defensivo)
           [ -z "$CHANNELS" ] && CHANNELS="both"
-          DRY="${{ inputs.dry_run }}"
           [ -z "$DRY" ] && DRY="false"
-          ALSO="${{ inputs.also_text }}"
           [ -z "$ALSO" ] && ALSO="false"
-          IMPACTO="${{ inputs.impacto_override }}"
-          ACCION="${{ inputs.accion_override }}"
-
+          
+          # Convertir boolean "true"/"false" a minúsculas para consistencia
+          DRY=$(echo "$DRY" | tr '[:upper:]' '[:lower:]')
+          ALSO=$(echo "$ALSO" | tr '[:upper:]' '[:lower:]')
+          
+          echo "📋 Config final:"
+          echo "  CHANNELS=$CHANNELS"
+          echo "  DRY_RUN=$DRY"
+          echo "  ALSO_TEXT=$ALSO"
+          
+          # Exportar al environment para los siguientes steps
           echo "CHANNELS=$CHANNELS" >> $GITHUB_ENV
           echo "NOTIFY_DRY_RUN=$DRY" >> $GITHUB_ENV
           echo "ALSO_TEXT=$ALSO" >> $GITHUB_ENV
-
+          
           # Si hay overrides, guardamos JSON para mezclar luego
           if [ -n "$IMPACTO" ] || [ -n "$ACCION" ]; then
             echo "{\"IMPACTO_CLIENTE_SI_NO\":\"$IMPACTO\",\"ACCION_SUGERIDA\":\"$ACCION\"}" > .github/out/overrides.json
@@ -159,29 +257,64 @@ jobs:
           over = json.load(open(".github/out/overrides.json","r",encoding="utf-8"))
           base.update({k:v for k,v in over.items() if v != ""})
           json.dump(base, open(".github/out/digest_data.json","w",encoding="utf-8"), ensure_ascii=False, indent=2)
+          print("✅ Overrides fusionados")
           PY
 
       - name: Send or preview digest
+        if: ${{ steps.validate.outputs.valid == 'true' || env.NOTIFY_DRY_RUN == 'true' }}
         env:
           TELEGRAM_BOT_TOKEN: ${{ secrets.TELEGRAM_BOT_TOKEN }}
           TELEGRAM_USER_ID: ${{ secrets.TELEGRAM_USER_ID }}
           TEAMS_WEBHOOK_URL: ${{ secrets.TEAMS_WEBHOOK_URL }}
           NOTIFY_DRY_RUN: ${{ env.NOTIFY_DRY_RUN }}
         run: |
+          echo "🚀 Iniciando envío de digest..."
+          echo "  📤 Canales: $CHANNELS"
+          echo "  👁️ Dry-run: $NOTIFY_DRY_RUN"
+          
           CMD="python run_digest.py \
             --text-template templates/dora_email.txt \
             --html-template templates/dora_email.html \
             --data .github/out/digest_data.json \
             --channels \"$CHANNELS\""
-          # Compatibilidad (no hace nada, pero el script acepta la flag)
+          
           if [ "$ALSO_TEXT" = "true" ]; then
             CMD="$CMD --also-text"
           fi
           if [ "$NOTIFY_DRY_RUN" = "true" ]; then
             CMD="$CMD --preview-out .github/out/preview"
           fi
+          
           echo "[RUN] $CMD"
-          eval $CMD
+          if eval $CMD; then
+            echo "✅ Digest procesado correctamente"
+          else
+            echo "❌ Error procesando digest"
+            exit 1
+          fi
+
+      - name: "⛔️ BLOCKED: Digest vacío, no se envió"
+        if: ${{ steps.validate.outputs.valid == 'false' && env.NOTIFY_DRY_RUN == 'false' }}
+        run: |
+          echo "╔════════════════════════════════════════════════════════════════════╗"
+          echo "║ 🛑 DIGEST VACÍO - ENVÍO BLOQUEADO                                  ║"
+          echo "╚════════════════════════════════════════════════════════════════════╝"
+          echo ""
+          echo "⚠️  NO se envió ningún reporte porque los datos estaban vacíos."
+          echo ""
+          echo "Probable causa:"
+          echo "  • Los sitios de status estaban CAÍDOS o no respondían"
+          echo "  • Los selectores CSS de algún vendor cambiaron"
+          echo "  • Problema de conectividad de red en el runner"
+          echo "  • Timeout esperando a que cargue Selenium"
+          echo ""
+          echo "Próximos pasos:"
+          echo "  1. Ejecuta localmente: python scripts/diagnose.py"
+          echo "  2. Identifica qué vendor falló"
+          echo "  3. Revisa: SAVE_HTML=1 python run_vendor.py --vendor <name>"
+          echo ""
+          echo "Si es bloqueado incorrectamente en dry-run, revisa validate_digest.py"
+          echo ""
 
       - name: Upload digest preview
         if: ${{ env.NOTIFY_DRY_RUN == 'true' }}
@@ -192,3 +325,13 @@ jobs:
             .github/out/preview/**
             .github/out/digest_data.json
           if-no-files-found: error
+
+      - name: Summary
+        if: always()
+        run: |
+          echo "📊 RESUMEN DE EJECUCIÓN"
+          echo "======================="
+          echo "✅ Workflow completado"
+          if [ "$NOTIFY_DRY_RUN" = "true" ]; then
+            echo "📋 Revisar artifacts: digest-preview"
+          fi
