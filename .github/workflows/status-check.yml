@@ -96,7 +96,7 @@ jobs:
           # Capturar timing
           START=$(date +%s)
           
-          if python run_vendor.py --vendor ${{ matrix.vendor }} --export-json ".github/out/vendors/${{ matrix.vendor }}.json"; then
+          if python scripts/run_vendor.py --vendor ${{ matrix.vendor }} --export-json ".github/out/vendors/${{ matrix.vendor }}.json"; then
             END=$(date +%s)
             ELAPSED=$((END - START))
             echo "✅ ${{ matrix.vendor }} completado exitosamente en ${ELAPSED}s"
@@ -285,7 +285,7 @@ jobs:
           echo "  📤 Canales: $CHANNELS"
           echo "  👁️ Dry-run: $NOTIFY_DRY_RUN"
           
-          CMD="python run_digest.py \
+          CMD="python scripts/run_digest.py \
             --text-template templates/dora_email.txt \
             --html-template templates/dora_email.html \
             --data .github/out/digest_data.json \
@@ -324,7 +324,7 @@ jobs:
           echo "Próximos pasos:"
           echo "  1. Ejecuta localmente: python scripts/diagnose.py"
           echo "  2. Identifica qué vendor falló"
-          echo "  3. Revisa: SAVE_HTML=1 python run_vendor.py --vendor <name>"
+          echo "  3. Revisa: SAVE_HTML=1 python scripts/run_vendor.py --vendor <name>"
           echo ""
           echo "Si es bloqueado incorrectamente en dry-run, revisa validate_digest.py"
           echo ""
