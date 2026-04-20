@@ -41,6 +41,10 @@ concurrency:
   cancel-in-progress: true
 
 env:
+  # Opt-in para Node.js 24 (deprecation de Node.js 20)
+  # https://github.blog/changelog/2025-09-19-deprecation-of-node-20-on-github-actions-runners/
+  FORCE_JAVASCRIPT_ACTIONS_TO_NODE24: "true"
+  
   # Valores por defecto para CRON (se sobrescribirán en manual si es necesario)
   # En schedule, inputs NO están disponibles, así que usamos env directamente
   DEFAULT_SEND_CHANNELS: "both"
