@@ -154,6 +154,24 @@ jobs:
           python -m pip install --upgrade pip
           pip install -r requirements.txt
 
+      - name: Download vendor artifacts
+        uses: actions/download-artifact@v4
+        with:
+          path: .github/out
+          pattern: vendor-*
+          merge-multiple: false
+
+      - name: Flatten artifact structure (vendor-* → vendors/)
+        run: |
+          mkdir -p .github/out/vendors
+          for artifact_dir in .github/out/vendor-*; do
+            if [ -d "$artifact_dir" ]; then
+              mv "$artifact_dir"/*.json .github/out/vendors/ 2>/dev/null || true
+              rmdir "$artifact_dir" 2>/dev/null || true
+            fi
+          done
+          echo "✅ Artifacts reorganizados"
+
       - name: Verify downloaded artifacts
         id: verify_artifacts
         run: |
