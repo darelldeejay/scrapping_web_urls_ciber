@@ -26,6 +26,11 @@ import tempfile
 from datetime import datetime
 from typing import Dict, List, Any
 
+# Force UTF-8 encoding for stdout on Windows
+if sys.platform == 'win32':
+    import io
+    sys.stdout = io.TextIOWrapper(sys.stdout.buffer, encoding='utf-8', errors='replace')
+
 def run_vendor_with_debug(vendor_name: str, tmpdir: str) -> Dict[str, Any]:
     """Ejecuta vendor con capturas de debug."""
     
@@ -36,8 +41,12 @@ def run_vendor_with_debug(vendor_name: str, tmpdir: str) -> Dict[str, Any]:
     env["SAVE_HTML"] = "1"  # Guarda HTML para análisis
     env["DEBUG"] = "1"       # Activa debug si existe
     
+    # Construir ruta relativa al script actual
+    script_dir = os.path.dirname(os.path.abspath(__file__))
+    run_vendor_path = os.path.join(script_dir, "run_vendor.py")
+    
     cmd = [
-        sys.executable, "run_vendor.py",
+        sys.executable, run_vendor_path,
         "--vendor", vendor_name,
         "--export-json", out_file
     ]

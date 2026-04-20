@@ -1,8 +1,15 @@
 # build_digest.py
 import os
+import sys
 import importlib
 from datetime import datetime, timezone
 from jinja2 import Environment, FileSystemLoader, select_autoescape
+
+# Fix sys.path para encontrar módulos desde cualquier ubicación
+script_dir = os.path.dirname(os.path.abspath(__file__))
+repo_root = os.path.dirname(script_dir)  # Subir un nivel de scripts/ a raíz
+if repo_root not in sys.path:
+    sys.path.insert(0, repo_root)
 
 from common.browser import start_driver
 from common.notify import send_telegram, send_teams

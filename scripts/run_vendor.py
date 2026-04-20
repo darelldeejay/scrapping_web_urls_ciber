@@ -2,9 +2,17 @@
 # -*- coding: utf-8 -*-
 
 import os
+import sys
 import argparse
 import importlib
 from datetime import datetime, timezone
+
+# Fix sys.path para encontrar módulos desde cualquier ubicación
+# Cuando se ejecuta scripts/run_vendor.py, Python necesita poder importar 'common'
+script_dir = os.path.dirname(os.path.abspath(__file__))
+repo_root = os.path.dirname(script_dir)  # Subir un nivel de scripts/ a raíz
+if repo_root not in sys.path:
+    sys.path.insert(0, repo_root)
 
 # Arranque Selenium
 from common.browser import make_driver

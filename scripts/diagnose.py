@@ -23,11 +23,20 @@ import subprocess
 import tempfile
 from datetime import datetime
 
+# Force UTF-8 encoding for stdout on Windows
+if sys.platform == 'win32':
+    import io
+    sys.stdout = io.TextIOWrapper(sys.stdout.buffer, encoding='utf-8', errors='replace')
+
 def run_vendor(vendor_name: str, tmpdir: str) -> dict:
     """Ejecuta un vendor y retorna status."""
     out_file = os.path.join(tmpdir, f"{vendor_name}.json")
+    # Construir ruta relativa al script actual (scripts/diagnose.py)
+    # Para invocar scripts/run_vendor.py desde any location
+    script_dir = os.path.dirname(os.path.abspath(__file__))
+    run_vendor_path = os.path.join(script_dir, "run_vendor.py")
     cmd = [
-        sys.executable, "run_vendor.py",
+        sys.executable, run_vendor_path,
         "--vendor", vendor_name,
         "--export-json", out_file
     ]

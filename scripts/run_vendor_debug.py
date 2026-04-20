@@ -22,6 +22,11 @@ import subprocess
 from datetime import datetime
 from pathlib import Path
 
+# Force UTF-8 encoding for stdout on Windows
+if sys.platform == 'win32':
+    import io
+    sys.stdout = io.TextIOWrapper(sys.stdout.buffer, encoding='utf-8', errors='replace')
+
 def run_vendor_with_debug(vendor_name: str, export_json: str = None) -> dict:
     """Ejecuta un vendor con logging detallado y captura de errores."""
     
@@ -39,7 +44,11 @@ def run_vendor_with_debug(vendor_name: str, export_json: str = None) -> dict:
     env["DEBUG"] = "1"
     env["VENDOR_TIMEOUT"] = "120"  # 2 minutos por vendor
     
-    cmd = [sys.executable, "run_vendor.py", "--vendor", vendor_name]
+    # Construir ruta relativa al script actual
+    script_dir = os.path.dirname(os.path.abspath(__file__))
+    run_vendor_path = os.path.join(script_dir, "run_vendor.py")
+    
+    cmd = [sys.executable, run_vendor_path, "--vendor", vendor_name]
     if export_json:
         cmd.extend(["--export-json", export_json])
     
