@@ -1,8 +1,8 @@
-Asunto: [BANCO PICHINCHA - DORA] Informe diario de terceros ICT — {{FECHA_UTC}} (UTC)
+Asunto: [{{CLIENT_NAME}} - DORA] Informe diario de terceros ICT — {{FECHA_UTC}} (UTC)
 
 {{SALUDO_LINEA}}
 
-BANCO PICHINCHA - DORA
+{{CLIENT_NAME}} - DORA
 ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 MONITOREO DE TERCEROS ICT
 {{FECHA_UTC}} | {{HORA_MUESTREO_UTC}} (UTC)

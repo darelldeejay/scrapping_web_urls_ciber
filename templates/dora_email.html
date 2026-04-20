@@ -2,7 +2,7 @@
 <html lang="es">
 <head>
     <meta charset="utf-8">
-    <title>[BANCO PICHINCHA - DORA] Informe diario de terceros ICT — {{FECHA_UTC}} (UTC)</title>
+    <title>[{{CLIENT_NAME}} - DORA] Informe diario de terceros ICT — {{FECHA_UTC}} (UTC)</title>
     <meta name="viewport" content="width=device-width, initial-scale=1">
     <style>
         body { 
@@ -183,7 +183,7 @@
     <div class="container">
         <!-- Header Corporativo -->
         <header class="header-corporate">
-            <h1 class="bank-title">BANCO PICHINCHA</h1>
+            <h1 class="bank-title">{{CLIENT_NAME}}</h1>
             <h2 class="dora-subtitle">Digital Operational Resilience Act</h2>
             <p style="margin: 5px 0; font-size: 15px;">Monitoreo de Terceros ICT</p>
             <div class="report-meta">
@@ -288,7 +288,7 @@
                 </div>
                 <div class="footer-compliance">
                     <strong>Cumplimiento DORA:</strong> Este reporte cumple con el Article 28 sobre monitoreo de terceros<br>
-                    <strong>Confidencial:</strong> Información exclusiva para uso interno Banco Pichincha<br>
+                    <strong>Confidencial:</strong> {{EMAIL_CONFIDENTIAL_FOOTER}}<br>
                     {{FIRMA_HTML}}
                 </div>
             </div>
