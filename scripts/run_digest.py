@@ -8,6 +8,10 @@ from datetime import datetime, timezone
 from typing import Dict, Optional, List, Tuple
 import re
 import requests
+# Importar config para obtener datos del cliente
+import sys
+sys.path.insert(0, os.path.abspath(os.path.join(os.path.dirname(__file__), '..')))
+from common.config import ClientConfig
 
 # ---------------- Utilidades ----------------
 
@@ -176,7 +180,13 @@ def main():
     ap.add_argument("--preview-out", help="Directorio donde guardar previsualización (subject/html/text). Implica no enviar.")
     args = ap.parse_args()
 
-    data = inject_defaults(load_data(args.data))
+    # Cargar datos del digest y del cliente
+    digest_data = load_data(args.data)
+    config = ClientConfig()
+    client_vars = config.get_template_vars()
+    # Combinar datos: prioridad a digest_data, pero siempre incluir datos de cliente
+    data = inject_defaults({**client_vars, **digest_data})
+
     text_subject, text_body_tpl = load_text_template(args.text_template)
     html_subject, html_tpl = load_html_template(args.html_template)
 
