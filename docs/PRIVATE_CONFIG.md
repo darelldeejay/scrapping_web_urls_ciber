@@ -22,7 +22,7 @@ common/config.py      ← Lee variables
     ↓
 Scripts (run_digest.py) ← Usa CONFIG para templates
     ↓
-Email con nombre cliente ← Sale con "BANCO PICHINCHA" pero no está en GitHub
+Email con nombre cliente ← Sale con "<TU_CLIENTE>" pero no está en GitHub
 ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 ```
 
@@ -89,7 +89,7 @@ env:
 
 ## Ejemplo: Migrar a Otro Cliente
 
-Para usar este repositorio con otro cliente (ej: "Banco XYZ"):
+Para usar este repositorio con otro cliente (ej: "<OTRO_CLIENTE>"):
 
 ```bash
 # Solo cambiar el archivo .env
