@@ -12,25 +12,25 @@
 ### Cliente
 
 ```
-CLIENT_NAME: BANCO PICHINCHA
-CLIENT_CODE: PICHINCHA
-CLIENT_FULL_NAME: Banco Pichincha - Monitoreo DORA ICT
+CLIENT_NAME: <NOMBRE_CLIENTE>
+CLIENT_CODE: <CODIGO_CLIENTE>
+CLIENT_FULL_NAME: <NOMBRE_CLIENTE> - Monitoreo DORA ICT
 ```
 
 ### Email
 
 ```
-EMAIL_SUBJECT_PREFIX: [BANCO PICHINCHA - DORA]
-EMAIL_CONFIDENTIAL_FOOTER: Información exclusiva para uso interno BANCO PICHINCHA
+EMAIL_SUBJECT_PREFIX: [<NOMBRE_CLIENTE> - DORA]
+EMAIL_CONFIDENTIAL_FOOTER: Información exclusiva para uso interno <NOMBRE_CLIENTE>
 ```
 
 ### Contacto
 
 ```
-CONTACT_PERSON: Equipo de Seguridad ICT
-CONTACT_DEPARTMENT: Seguridad de Información
-CLIENT_PORTAL_URL: https://portal.banco.pichincha.com
-CLIENT_SUPPORT_EMAIL: security@banco.pichincha.com
+CONTACT_PERSON: <NOMBRE_PERSONA_RESPONSABLE>
+CONTACT_DEPARTMENT: <DEPARTAMENTO>
+CLIENT_PORTAL_URL: <URL_PORTAL_DEL_CLIENTE>
+CLIENT_SUPPORT_EMAIL: <EMAIL_SOPORTE_DEL_CLIENTE>
 ```
 
 ### Notificaciones (Telegram)
@@ -50,18 +50,28 @@ TEAMS_WEBHOOK_URL: <TU_WEBHOOK_URL_AQUI>
 
 ## Pasos para usar:
 
-1. **Copiar este archivo**:
+1. **Copiar este archivo** con nombre SIN `.example`:
    ```bash
    cp CONFIGURACION_LOCAL.md.example CONFIGURACION_LOCAL.md
    ```
 
-2. **Editar `CONFIGURACION_LOCAL.md`** con tus valores reales (este archivo está en .gitignore)
+2. **Editar `CONFIGURACION_LOCAL.md`** con tus valores reales:
+   ```bash
+   # Reemplazar <NOMBRE_CLIENTE> por tu cliente real, etc.
+   # Este archivo está en .gitignore, NO se commitea a GitHub
+   ```
 
-3. **Usar esos valores en**:
-   - `cp .env.example .env` → llenar con tus valores
-   - GitHub Secrets → crear con mismos valores
+3. **Copiar también `.env`**:
+   ```bash
+   cp .env.example .env
+   ```
 
-4. **Verificar**: `python -c "from common.config import get_config; cfg = get_config(); print(cfg.client_name)"`
+4. **Editar `.env`** con los mismos valores que en CONFIGURACION_LOCAL.md
+
+5. **Verificar** que funciona localmente:
+   ```bash
+   python -c "from common.config import get_config; cfg = get_config(); print(cfg.client_name)"
+   ```
 
 ---
 
