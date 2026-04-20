@@ -2,3 +2,11 @@ __pycache__/
 *.pyc
 incidents.json
 .env
+
+# Debug and scraping artifacts (generated during CI runs)
+*_page_source.html
+.github/out/vendors/
+.github/out/preview/
+.github/out/digest_data.json
+.github/out/vendor_debug_report.md
+docs/TIMEOUT_AND_CI_FIX.md
