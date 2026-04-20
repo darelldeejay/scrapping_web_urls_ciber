@@ -1,4 +1,4 @@
-## 🚀 SETUP RÁPIDO - Configurar para Banco Pichincha
+## 🚀 SETUP RÁPIDO - Configurar para tu Cliente
 
 ### ⚡ En tu máquina (desarrollo local)
 
@@ -13,25 +13,34 @@ nano .env  # o usa tu editor favorito
 Contenido de `.env` (PRIVADO - NUNCA COMMITEAR):
 ```env
 # Información del cliente
-CLIENT_NAME="BANCO PICHINCHA"
-CLIENT_CODE="PICHINCHA"
-CLIENT_FULL_NAME="Banco Pichincha - Monitoreo DORA ICT"
+# ⚠️ IMPORTANTE: Reemplaza <CLIENTE> con tu cliente real
+# Este archivo NUNCA se commitea a GitHub
+
+CLIENT_NAME="<NOMBRE_CLIENTE>"
+CLIENT_CODE="<CÓDIGO_CLIENTE>"
+CLIENT_FULL_NAME="<CLIENTE> - Monitoreo DORA ICT"
 
 # Email
-EMAIL_SUBJECT_PREFIX="[BANCO PICHINCHA - DORA]"
-EMAIL_CONFIDENTIAL_FOOTER="Información exclusiva para uso interno Banco Pichincha"
+EMAIL_SUBJECT_PREFIX="[<NOMBRE_CLIENTE> - DORA]"
+EMAIL_CONFIDENTIAL_FOOTER="Información exclusiva para uso interno <NOMBRE_CLIENTE>"
 
 # Contacto
 CONTACT_PERSON="Equipo de Seguridad ICT"
 CONTACT_DEPARTMENT="Seguridad de Información"
 
 # URLs (opcional)
-CLIENT_PORTAL_URL="https://security.pichincha.com"
-CLIENT_SUPPORT_EMAIL="security@pichincha.com.ec"
+CLIENT_PORTAL_URL="https://security.<cliente>.com"
+CLIENT_SUPPORT_EMAIL="security@<cliente>.com"
 
 # Notificaciones
 NOTIFY_TO_TELEGRAM=true
 NOTIFY_TO_TEAMS=true
+```
+
+**Ejemplo de configuración (PRIVADA en tu máquina):**
+```
+CLIENT_NAME="TU_CLIENTE_AQUÍ"
+CLIENT_CODE="TU_CÓDIGO_AQUÍ"
 ```
 
 Paso 3: Verificar que funciona
@@ -51,15 +60,18 @@ Para que el CRON tome tus datos privados, usa GitHub Secrets:
 
 | Secret Name | Value |
 |-------------|-------|
-| `CLIENT_NAME` | `BANCO PICHINCHA` |
-| `CLIENT_CODE` | `PICHINCHA` |
-| `EMAIL_CONFIDENTIAL_FOOTER` | `Información exclusiva para uso interno Banco Pichincha` |
+| `CLIENT_NAME` | `<TU_CLIENTE>` |
+| `CLIENT_CODE` | `<CÓDIGO_CLIENTE>` |
+| `EMAIL_CONFIDENTIAL_FOOTER` | `Información exclusiva para <TU_CLIENTE>` |
 | `CONTACT_PERSON` | `Equipo de Seguridad` |
 
+**⚠️ IMPORTANTE**: Los valores son EJEMPLOS. Reemplaza con tu cliente real.
+
 **3. El workflow automáticamente**:
-- Lee los secrets
+- Lee los secrets desde GitHub
 - Genera el email con tu cliente
 - Envía a Teams/Telegram
+- Los valores NUNCA aparecen en logs
 
 ---
 
@@ -68,9 +80,10 @@ Para que el CRON tome tus datos privados, usa GitHub Secrets:
 Ejecuta esto para confirmar que todo está privado:
 
 ```bash
-# ¿El repo tiene referencias a BANCO PICHINCHA?
-grep -r "BANCO PICHINCHA" . --exclude-dir=.git --exclude-dir=__pycache__
-# Debe retornar SOLO archivos en .env (privado) y documentación
+# ¿El repo tiene referencias públicas a tu cliente?
+# Nota: Solo debe haber referencias en .env (privado)
+grep -r "TU_CLIENTE" . --exclude-dir=.git --exclude-dir=__pycache__
+# No debe retornar NADA (porque TU_CLIENTE está solo en .env privado)
 
 # ¿.env está protegido?
 git status .env
@@ -83,8 +96,8 @@ git status .env
 ### 🔐 Después de configurar
 
 Los reportes automáticamente:
-- ✅ Contienen el nombre de tu cliente (BANCO PICHINCHA)
-- ✅ Pero el repositorio NO expone nada privado
+- ✅ Contienen el nombre de tu cliente (desde .env privado)
+- ✅ Pero el repositorio NO expone nada privado en GitHub
 - ✅ Son reutilizables para otros clientes (solo cambiar .env)
 
 ---

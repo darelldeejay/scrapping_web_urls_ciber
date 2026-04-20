@@ -38,22 +38,25 @@ cp .env.example .env
 
 ```bash
 # .env (NO commitear este archivo)
-CLIENT_NAME="BANCO PICHINCHA"
-CLIENT_CODE="PICHINCHA"
-CLIENT_FULL_NAME="Banco Pichincha - Monitoreo DORA ICT"
-EMAIL_SUBJECT_PREFIX="[BANCO PICHINCHA - DORA]"
-EMAIL_CONFIDENTIAL_FOOTER="Información exclusiva para uso interno Banco Pichincha"
+# ⚠️ IMPORTANTE: Reemplaza <CLIENTE> con tu cliente real
+# Este archivo NUNCA se commitea a GitHub
+
+CLIENT_NAME="<TU_CLIENTE>"
+CLIENT_CODE="<CÓDIGO_CLIENTE>"
+CLIENT_FULL_NAME="<TU_CLIENTE> - Monitoreo DORA ICT"
+EMAIL_SUBJECT_PREFIX="[<TU_CLIENTE> - DORA]"
+EMAIL_CONFIDENTIAL_FOOTER="Información exclusiva para uso interno <TU_CLIENTE>"
 CONTACT_PERSON="Equipo de Seguridad ICT"
 CONTACT_DEPARTMENT="Seguridad de Información"
-CLIENT_PORTAL_URL="https://portal.pichincha.com"
-CLIENT_SUPPORT_EMAIL="security@pichincha.com.ec"
+CLIENT_PORTAL_URL="https://portal.<cliente>.com"
+CLIENT_SUPPORT_EMAIL="security@<cliente>.com"
 ```
 
 ### Paso 3: Verificar configuración
 
 ```bash
 python -c "from common.config import get_config; cfg = get_config(); print(cfg)"
-# Output: ClientConfig(client_name='BANCO PICHINCHA', client_code='PICHINCHA')
+# Output: ClientConfig(client_name='<TU_CLIENTE>', client_code='<CÓDIGO_CLIENTE>')
 ```
 
 ## Para GitHub Actions (CI)
@@ -64,9 +67,9 @@ Usa GitHub Secrets para configurar variables en producción:
 
 Crear estos secrets:
 ```
-CLIENT_NAME=BANCO PICHINCHA
-CLIENT_CODE=PICHINCHA
-EMAIL_CONFIDENTIAL_FOOTER=Información exclusiva para Banco Pichincha
+CLIENT_NAME=<TU_CLIENTE>
+CLIENT_CODE=<CÓDIGO_CLIENTE>
+EMAIL_CONFIDENTIAL_FOOTER=Información exclusiva para <TU_CLIENTE>
 ```
 
 2. **Workflow (`.github/workflows/status-check.yml`)** lee automáticamente:
@@ -90,8 +93,8 @@ Para usar este repositorio con otro cliente (ej: "Banco XYZ"):
 
 ```bash
 # Solo cambiar el archivo .env
-CLIENT_NAME="BANCO XYZ"
-CLIENT_CODE="XYZ"
+CLIENT_NAME="<OTRO_CLIENTE>"
+CLIENT_CODE="<OTRO_CÓDIGO>"
 # ... resto de configuración
 ```
 
@@ -99,7 +102,7 @@ Luego ejecutar los scripts:
 ```bash
 python scripts/run_vendor.py --vendor aruba --export-json .github/out/vendors/aruba.json
 python scripts/run_digest.py --data .github/out/digest_data.json
-# Los reportes saldrán con "BANCO XYZ" en lugar de "BANCO PICHINCHA"
+# Los reportes saldrán con el nombre del cliente configurado en .env
 ```
 
 ## Integración en Código Python
@@ -114,7 +117,7 @@ print(f"Footer: {config.email_confidential_footer}")
 # Para templates
 vars = config.get_template_vars()
 email_subject = config.get_email_subject("2026-04-20")
-# Output: "[BANCO PICHINCHA - DORA] Informe diario de terceros ICT — 2026-04-20 (UTC)"
+# Output: "[<TU_CLIENTE> - DORA] Informe diario de terceros ICT — 2026-04-20 (UTC)"
 ```
 
 ## Mejores Prácticas
