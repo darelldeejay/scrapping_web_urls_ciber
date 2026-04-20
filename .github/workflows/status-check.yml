@@ -218,6 +218,10 @@ jobs:
           echo "EMAIL_CONFIDENTIAL_FOOTER=${{ secrets.EMAIL_CONFIDENTIAL_FOOTER }}" >> $GITHUB_ENV
           # Agrega aquí otros secrets relevantes si los usas
 
+      - name: Debug env CLIENT_NAME
+        run: |
+          echo "Valor de CLIENT_NAME en el entorno:" && env | grep CLIENT_NAME || echo "No está definida"
+
       - name: Build digest data JSON
         run: |
           python scripts/build_digest_data.py \
