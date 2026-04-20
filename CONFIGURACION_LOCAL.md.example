@@ -1,0 +1,73 @@
+# 🔒 CONFIGURACIÓN LOCAL PRIVADA (NO COMMITEAR A GITHUB)
+
+**IMPORTANTE**: Este archivo contiene datos reales del cliente. 
+- **NO** debe subirse a GitHub
+- **SOLO** debe existir en tu máquina local
+- Renombra a `CONFIGURACION_LOCAL.md` después de llenar
+
+---
+
+## Mis Valores Reales (Llenar con datos del cliente)
+
+### Cliente
+
+```
+CLIENT_NAME: BANCO PICHINCHA
+CLIENT_CODE: PICHINCHA
+CLIENT_FULL_NAME: Banco Pichincha - Monitoreo DORA ICT
+```
+
+### Email
+
+```
+EMAIL_SUBJECT_PREFIX: [BANCO PICHINCHA - DORA]
+EMAIL_CONFIDENTIAL_FOOTER: Información exclusiva para uso interno BANCO PICHINCHA
+```
+
+### Contacto
+
+```
+CONTACT_PERSON: Equipo de Seguridad ICT
+CONTACT_DEPARTMENT: Seguridad de Información
+CLIENT_PORTAL_URL: https://portal.banco.pichincha.com
+CLIENT_SUPPORT_EMAIL: security@banco.pichincha.com
+```
+
+### Notificaciones (Telegram)
+
+```
+TELEGRAM_BOT_TOKEN: <TU_TOKEN_AQUI>
+TELEGRAM_USER_ID: <TU_USER_ID_AQUI>
+```
+
+### Notificaciones (Teams)
+
+```
+TEAMS_WEBHOOK_URL: <TU_WEBHOOK_URL_AQUI>
+```
+
+---
+
+## Pasos para usar:
+
+1. **Copiar este archivo**:
+   ```bash
+   cp CONFIGURACION_LOCAL.md.example CONFIGURACION_LOCAL.md
+   ```
+
+2. **Editar `CONFIGURACION_LOCAL.md`** con tus valores reales (este archivo está en .gitignore)
+
+3. **Usar esos valores en**:
+   - `cp .env.example .env` → llenar con tus valores
+   - GitHub Secrets → crear con mismos valores
+
+4. **Verificar**: `python -c "from common.config import get_config; cfg = get_config(); print(cfg.client_name)"`
+
+---
+
+## ⚠️ Seguridad
+
+- ✅ Este archivo `.example` puede estar en GitHub (es solo template)
+- ✅ `CONFIGURACION_LOCAL.md` (sin `.example`) está en `.gitignore`
+- ✅ `.env` también está en `.gitignore`
+- ❌ NUNCA commitear archivos con datos reales del cliente

@@ -7,47 +7,49 @@ cd "c:\Users\darelldeejay\OneDrive\Gitea\Scrapping Web\repo"
 cp .env.example .env
 ```
 
-Editar `.env` y reemplazar valores:
+Editar `.env` y reemplazar valores con los de tu cliente:
 
 ```env
-# Cliente
-CLIENT_NAME="BANCO PICHINCHA"
-CLIENT_CODE="PICHINCHA"
-CLIENT_FULL_NAME="Banco Pichincha - Monitoreo DORA ICT"
+# Cliente - REEMPLAZAR CON TUS VALORES REALES
+CLIENT_NAME="<NOMBRE_CLIENTE>"
+CLIENT_CODE="<CODIGO_CLIENTE>"
+CLIENT_FULL_NAME="<NOMBRE_CLIENTE> - Monitoreo DORA ICT"
 
-# Email
-EMAIL_SUBJECT_PREFIX="[BANCO PICHINCHA - DORA]"
-EMAIL_CONFIDENTIAL_FOOTER="Información exclusiva para uso interno BANCO PICHINCHA"
+# Email - PERSONALIZAR PARA TU CLIENTE
+EMAIL_SUBJECT_PREFIX="[<NOMBRE_CLIENTE> - DORA]"
+EMAIL_CONFIDENTIAL_FOOTER="Información exclusiva para uso interno <NOMBRE_CLIENTE>"
 
-# Contacto
-CONTACT_PERSON="Equipo de Seguridad ICT"
-CONTACT_DEPARTMENT="Seguridad de Información"
+# Contacto - PERSONALIZAR
+CONTACT_PERSON="<PERSONA_RESPONSABLE>"
+CONTACT_DEPARTMENT="<DEPARTAMENTO>"
 
 # URLs (opcional)
-CLIENT_PORTAL_URL="https://portal.banco.pichincha.com"
-CLIENT_SUPPORT_EMAIL="security@banco.pichincha.com"
+CLIENT_PORTAL_URL="<URL_PORTAL_CLIENTE>"
+CLIENT_SUPPORT_EMAIL="<EMAIL_SOPORTE>"
 
 # Notificaciones
 NOTIFY_TO_TELEGRAM=true
 NOTIFY_TO_TEAMS=true
 ```
 
+**⚠️ IMPORTANTE**: Este archivo `.env` es **PRIVADO y NUNCA debe commiterse a GitHub**. Ya está en `.gitignore`.
+
 ## Paso 2: Configurar GitHub Secrets (para CI/CD)
 
 **Ir a**: GitHub → Settings → Secrets and variables → Actions → New repository secret
 
-Crear estos secrets:
+Crear estos secrets (reemplazar con valores de tu cliente):
 
-| Secret Name | Valor | Notas |
+| Secret Name | Ejemplo | Notas |
 |---|---|---|
-| `CLIENT_NAME` | `BANCO PICHINCHA` | Nombre del cliente |
-| `CLIENT_CODE` | `PICHINCHA` | Código interno |
-| `EMAIL_CONFIDENTIAL_FOOTER` | `Información exclusiva para BANCO PICHINCHA` | Pie de página |
-| `TELEGRAM_BOT_TOKEN` | `123456:ABC-DEF...` | De @BotFather en Telegram |
-| `TELEGRAM_USER_ID` | `987654321` | Tu chat ID |
-| `TEAMS_WEBHOOK_URL` | `https://outlook.webhook.office.com/...` | De Teams Webhook |
+| `CLIENT_NAME` | `<NOMBRE_CLIENTE>` | Nombre del cliente (mismo que en `.env`) |
+| `CLIENT_CODE` | `<CODIGO_CLIENTE>` | Código interno |
+| `EMAIL_CONFIDENTIAL_FOOTER` | `Información exclusiva para <NOMBRE_CLIENTE>` | Pie de página |
+| `TELEGRAM_BOT_TOKEN` | `123456:ABC-DEF...` | De @BotFather en Telegram (opcional) |
+| `TELEGRAM_USER_ID` | `987654321` | Tu chat ID (opcional) |
+| `TEAMS_WEBHOOK_URL` | `https://outlook.webhook.office.com/...` | De Teams Webhook (opcional) |
 
-⚠️ **NOTA**: Estos secrets **NUNCA se expondrán en logs** - GitHub los enmascara automáticamente.
+⚠️ **NOTA CRÍTICA**: Los secrets **NUNCA se expondrán en logs** - GitHub los enmascara automáticamente. Pero deben coincidir con los valores de `.env` local.
 
 ## Paso 3: Verificar localmente
 

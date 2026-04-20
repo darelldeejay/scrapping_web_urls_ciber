@@ -6,6 +6,7 @@ incidents.json
 .env
 .env.local
 .env.*.local
+CONFIGURACION_LOCAL.md
 
 # Debug and scraping artifacts (generated during CI runs)
 *_page_source.html
