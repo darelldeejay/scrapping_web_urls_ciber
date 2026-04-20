@@ -205,6 +205,13 @@ jobs:
           # Exportar para siguiente step
           echo "artifact_count=$COUNT" >> $GITHUB_OUTPUT
 
+      - name: Export secrets to env
+        run: |
+          echo "CLIENT_NAME=${{ secrets.CLIENT_NAME }}" >> $GITHUB_ENV
+          echo "CLIENT_CODE=${{ secrets.CLIENT_CODE }}" >> $GITHUB_ENV
+          echo "EMAIL_CONFIDENTIAL_FOOTER=${{ secrets.EMAIL_CONFIDENTIAL_FOOTER }}" >> $GITHUB_ENV
+          # Agrega aquí otros secrets relevantes si los usas
+
       - name: Build digest data JSON
         run: |
           python scripts/build_digest_data.py \
