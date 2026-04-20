@@ -17,7 +17,10 @@ def main():
     ap = argparse.ArgumentParser(description="Run single vendor or export JSON for digest")
     ap.add_argument("--vendor", required=True, help="nombre del vendor (slug): aruba, cyberark, ...")
     ap.add_argument("--export-json", help="ruta de salida JSON con resumen para digest")
-    ap.add_argument("--headless", action="store_true", default=True)
+    ap.add_argument("--headless", action="store_true", default=True,
+                        help="Ejecutar Chrome en modo headless (por defecto: activado)")
+    ap.add_argument("--no-headless", dest="headless", action="store_false",
+                        help="Desactivar headless para depuración (muestra el navegador)")
     args = ap.parse_args()
 
     slug = args.vendor.strip().lower()
