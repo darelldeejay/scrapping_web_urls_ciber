@@ -184,8 +184,8 @@ def main():
     digest_data = load_data(args.data)
     config = ClientConfig()
     client_vars = config.get_template_vars()
-    # Combinar datos: prioridad a digest_data, pero siempre incluir datos de cliente
-    data = inject_defaults({**client_vars, **digest_data})
+    # Combinar datos: prioridad a los datos de cliente si no existen en digest_data.json
+    data = inject_defaults({**digest_data, **client_vars})
 
     text_subject, text_body_tpl = load_text_template(args.text_template)
     html_subject, html_tpl = load_html_template(args.html_template)
