@@ -38,7 +38,7 @@ INCIDENT_ID_RE = re.compile(r"\bIncident\s+\d+\b", re.I)
 
 def now_utc_str() -> str:
     """Para mensajes legacy: con sufijo explícito UTC."""
-    return datetime.utcnow().strftime("%Y-%m-%d %H:%M UTC")
+    return datetime.now(timezone.utc).strftime("%Y-%m-%d %H:%M UTC")
 
 def _now_utc_clean() -> str:
     """Para export JSON: sin 'UTC' (se añade al render del digest)."""

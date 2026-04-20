@@ -1,8 +1,8 @@
 # common/format.py
-from datetime import datetime
+from datetime import datetime, timezone
 
 def header(vendor: str) -> str:
-    now = datetime.utcnow().strftime("%Y-%m-%d %H:%M UTC")
+    now = datetime.now(timezone.utc).strftime("%Y-%m-%d %H:%M UTC")
     return f"<b>{vendor} - Estado de Incidentes</b>\n<i>{now}</i>"
 
 def render_incidents(activos, pasados):

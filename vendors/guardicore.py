@@ -44,7 +44,7 @@ NO_INCIDENTS_TODAY_RE = re.compile(r"No incidents reported today", re.I)
 def now_utc_str():
     # OJO: esto incluye " UTC" porque lo usabas en mensajes.
     # Para export JSON, usaremos _now_utc_clean() sin " UTC".
-    return datetime.utcnow().strftime("%Y-%m-%d %H:%M UTC")
+    return datetime.now(timezone.utc).strftime("%Y-%m-%d %H:%M UTC")
 
 def _now_utc_clean():
     return datetime.now(timezone.utc).strftime("%Y-%m-%d %H:%M")
@@ -97,7 +97,7 @@ def parse_component_groups(soup: BeautifulSoup):
 # -------- Past Incidents: solo HOY --------
 
 def today_header_strings():
-    now = datetime.utcnow()
+    now = datetime.now(timezone.utc)
     with_zero = now.strftime("%b %d, %Y")
     no_zero  = with_zero.replace(" 0", " ")
     return {with_zero, no_zero}

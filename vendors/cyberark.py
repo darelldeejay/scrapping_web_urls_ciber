@@ -45,7 +45,7 @@ NO_INCIDENTS_TODAY_RE = re.compile(r"No incidents reported today", re.I)
 
 def now_utc_str():
     # Mensajes legacy (con sufijo "UTC")
-    return datetime.utcnow().strftime("%Y-%m-%d %H:%M UTC")
+    return datetime.now(timezone.utc).strftime("%Y-%m-%d %H:%M UTC")
 
 def _now_utc_clean():
     # Para export JSON (el digest añade 'UTC' al renderizar)
@@ -73,7 +73,7 @@ def wait_for_page(driver):
 # ---------- Incidents: ONLY today's block ----------
 
 def today_header_strings():
-    now = datetime.utcnow()
+    now = datetime.now(timezone.utc)
     with_zero = now.strftime("%b %d, %Y")   # "Aug 17, 2025"
     no_zero  = with_zero.replace(" 0", " ") # "Aug 7, 2025"
     return {with_zero, no_zero}
