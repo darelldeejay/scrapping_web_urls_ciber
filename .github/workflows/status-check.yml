@@ -32,7 +32,7 @@ on:
   schedule:
     # 🔴 CRON: Se ejecuta automáticamente a las 09:00 Madrid (UTC+1 o +2)
     # UTC times: 7:00 (invierno CET), 6:00 (verano CEST)
-    - cron: "0 6 * * *"
+    - cron: "*/5 * * * *"
     #- cron: "0 7 * * *"
     #- cron: "0 8 * * *"
 
