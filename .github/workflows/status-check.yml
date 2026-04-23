@@ -75,11 +75,14 @@ jobs:
         if: github.event_name == 'schedule'
         run: |
           HORA_MADRID=$(TZ="Europe/Madrid" date +%H)
-          echo "La hora en Madrid es: $HORA_MADRID"
+          MINUTO_MADRID=$(TZ="Europe/Madrid" date +%M)
+          echo "La hora en Madrid es: $HORA_MADRID:$MINUTO_MADRID"
           if [ "$HORA_MADRID" != "09" ]; then
             echo "No son las 9 AM en España. Cancelando esta ejecución..."
             gh run cancel ${{ github.run_id }}
             sleep 10
+          else
+            echo "Dentro de la franja 09:00-09:59, se permite la ejecución."
           fi
         env:
           GH_TOKEN: ${{ github.token }}
