@@ -5,7 +5,6 @@ import os
 import sys
 import argparse
 import importlib
-from datetime import datetime, timezone
 
 # Fix sys.path para encontrar módulos desde cualquier ubicación
 # Cuando se ejecuta scripts/run_vendor.py, Python necesita poder importar 'common'
@@ -17,12 +16,10 @@ if repo_root not in sys.path:
 # Arranque Selenium
 from common.browser import make_driver
 from common.logger import setup_logging, get_logger
+from common.utils import now_utc_str
 from bs4 import BeautifulSoup  # por si algún vendor lo usa internamente
 
 logger = get_logger(__name__)
-
-def now_utc_str():
-    return datetime.now(timezone.utc).strftime("%Y-%m-%d %H:%M")
 
 def main():
     setup_logging()

@@ -16,8 +16,13 @@ Construye el JSON de datos para las plantillas DORA (txt y html).
 Este script NO envía nada; solo prepara datos para run_digest.py.
 """
 
-import logging
 import os
+import sys
+
+# Fix sys.path antes de cualquier import de common/
+sys.path.insert(0, os.path.abspath(os.path.join(os.path.dirname(__file__), '..')))
+
+import logging
 import re
 import json
 import glob
@@ -25,13 +30,11 @@ import argparse
 from datetime import datetime, timezone, timedelta
 from typing import Dict, Any, List, Tuple
 
+from common.logger import setup_logging, get_logger
+
 # ---------------------------------------------------------------------------
 # Fuentes (mantener sincronizadas con vendors soportados)
 # ---------------------------------------------------------------------------
-
-import sys
-sys.path.insert(0, os.path.abspath(os.path.join(os.path.dirname(__file__), '..')))
-from common.logger import setup_logging, get_logger
 
 logger = get_logger(__name__)
 
