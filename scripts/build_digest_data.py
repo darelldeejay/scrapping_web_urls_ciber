@@ -208,10 +208,27 @@ def build_recommendations(vendors: List[Dict[str, Any]], counts: Dict[str, int])
         return ("No", "Monitorización habitual (sin acciones adicionales).")
 
     if mant > 0 and nuevos == 0 and resueltos == 0:
-        return ("No (mantenimiento programado)", "Verificar ventanas y posibles impactos planificados; sin acciones adicionales salvo seguimiento programado.")
+        vendors_mant = [
+            v.get("name", "?") for v in vendors
+            if any(UNDER_MAINT_RE.search(ln) for ln in _safe_lines(v.get("component_lines")))
+        ]
+        suffix = f" ({', '.join(vendors_mant)})" if vendors_mant else ""
+        return (
+            f"No (mantenimiento programado){suffix}",
+            "Verificar ventanas y posibles impactos planificados; sin acciones adicionales salvo seguimiento programado.",
+        )
 
     if nuevos > 0:
-        return ("Sí (potencial)", "Comunicación interna breve; monitorización reforzada; revisión de alertas SIEM/observabilidad; seguimiento con el/los fabricante(s) hasta resolución.")
+        vendors_inc = [
+            v.get("name", "?") for v in vendors
+            if any(STATUS_ANY_TODAY_RE.search(ln) for ln in _safe_lines(v.get("incidents_lines")))
+            and not v.get("overall_ok")
+        ]
+        suffix = f" — {', '.join(vendors_inc)}" if vendors_inc else ""
+        return (
+            f"Sí (potencial){suffix}",
+            "Comunicación interna breve; monitorización reforzada; revisión de alertas SIEM/observabilidad; seguimiento con el/los fabricante(s) hasta resolución.",
+        )
 
     # Solo resueltos hoy
     if resueltos > 0 and nuevos == 0:
