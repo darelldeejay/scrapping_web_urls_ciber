@@ -58,13 +58,6 @@ def make_driver(headless: bool = True, page_load_timeout: int = None) -> webdriv
     
     return driver
 
-# Compatibilidad retro para vendors que aún importan start_driver
-def start_driver(headless: bool = True, page_load_timeout: int = 60) -> webdriver.Chrome:
-    """
-    Alias legacy para compatibilidad con vendors antiguos.
-    """
-    return make_driver(headless=headless, page_load_timeout=page_load_timeout)
-
 def wait_for_page(driver: webdriver.Chrome, timeout: int = 20) -> None:
     """
     Espera a que document.readyState == 'complete'. Tolerante a pequeños fallos.

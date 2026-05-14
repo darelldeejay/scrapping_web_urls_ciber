@@ -24,7 +24,7 @@ from selenium.webdriver.support.ui import WebDriverWait
 from selenium.webdriver.support import expected_conditions as EC
 
 # Tu browser/notify originales para run()
-from common.browser import start_driver  # run() legacy
+from common.browser import make_driver
 from common.notify import send_telegram, send_teams
 from common.utils import now_utc_str, now_utc_clean, collapse_ws, today_utc
 
@@ -293,7 +293,7 @@ def collect(driver):
 # -------- Runner legacy (se mantiene) --------
 
 def run():
-    driver = start_driver()
+    driver = make_driver()
     try:
         try:
             driver.set_page_load_timeout(45)

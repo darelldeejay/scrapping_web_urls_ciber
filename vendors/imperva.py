@@ -25,7 +25,7 @@ from selenium.webdriver.common.by import By
 from selenium.webdriver.support.ui import WebDriverWait
 from selenium.webdriver.support import expected_conditions as EC
 
-from common.browser import start_driver
+from common.browser import make_driver
 from common.notify import send_telegram, send_teams
 from common.utils import now_utc_str, now_utc_clean, collapse_ws, today_utc
 
@@ -514,7 +514,7 @@ def collect(driver):
 # ---------- Runner (legacy con notificaciones) ----------
 
 def run():
-    driver = start_driver()
+    driver = make_driver()
     try:
         driver.get(URL)
         wait_for_page(driver)

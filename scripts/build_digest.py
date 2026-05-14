@@ -12,7 +12,7 @@ repo_root = os.path.dirname(script_dir)  # Subir un nivel de scripts/ a raíz
 if repo_root not in sys.path:
     sys.path.insert(0, repo_root)
 
-from common.browser import start_driver
+from common.browser import make_driver
 from common.notify import send_telegram, send_teams
 from common.mailer import send_email_smtp
 from common.logger import setup_logging, get_logger
@@ -119,7 +119,7 @@ def send_outputs(html_body: str, text_body: str):
 
 def main():
     setup_logging()
-    driver = start_driver()
+    driver = make_driver()
     try:
         vendors_collected = []
         for name, modname in VENDORS.items():
