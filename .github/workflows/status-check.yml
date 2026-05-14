@@ -30,9 +30,12 @@ on:
         default: ""
         type: string
   schedule:
-    # � CRON: Una sola entrada a las 08:00 UTC (entre UTC+1 y UTC+2 para Madrid).
-    # El job gatekeeper verifica que la hora en Madrid sea las 09:xx antes de continuar.
-    - cron: "0 8 * * *"
+    # 🕗 CRON: 8:30 AM hora Madrid en ambos horarios:
+    #   Invierno (CET  = UTC+1): 08:30 Madrid → 07:30 UTC
+    #   Verano   (CEST = UTC+2): 08:30 Madrid → 06:30 UTC
+    # El job gatekeeper verifica que sea la hora 08 en Madrid antes de continuar.
+    - cron: "30 7 * * *"   # invierno
+    - cron: "30 6 * * *"   # verano
 
 concurrency:
   group: dora-status-${{ github.ref }}
@@ -50,7 +53,7 @@ env:
 
 jobs:
   gatekeeper:
-    name: "Verificar horario (Madrid 09:00)"
+    name: "Verificar horario (Madrid 08:30)"
     runs-on: ubuntu-latest
     outputs:
       should_run: ${{ steps.check.outputs.should_run }}
@@ -64,12 +67,13 @@ jobs:
             exit 0
           fi
           HORA_MADRID=$(TZ="Europe/Madrid" date +%H)
-          echo "Hora en Madrid: $HORA_MADRID"
-          if [ "$HORA_MADRID" = "09" ]; then
-            echo "✅ Son las 09:xx en Madrid. Procediendo."
+          MINUTO_MADRID=$(TZ="Europe/Madrid" date +%M)
+          echo "Hora en Madrid: ${HORA_MADRID}:${MINUTO_MADRID}"
+          if [ "$HORA_MADRID" = "08" ]; then
+            echo "✅ Son las 08:xx en Madrid. Procediendo."
             echo "should_run=true" >> $GITHUB_OUTPUT
           else
-            echo "⏭️  No son las 09:xx en Madrid (${HORA_MADRID}:xx). Saltando."
+            echo "⏭️  No son las 08:xx en Madrid (${HORA_MADRID}:${MINUTO_MADRID}). Saltando."
             echo "should_run=false" >> $GITHUB_OUTPUT
           fi
 
