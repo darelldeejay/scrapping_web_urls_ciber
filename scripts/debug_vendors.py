@@ -84,7 +84,7 @@ def run_vendor_with_debug(vendor_name: str, tmpdir: str) -> Dict[str, Any]:
             report["json_keys"] = list(data.keys())
             report["has_incidents"] = bool(data.get("incidents_lines"))
             report["has_components"] = bool(data.get("component_lines"))
-        except:
+        except Exception:
             report["json_valid"] = False
     
     # Determinar status

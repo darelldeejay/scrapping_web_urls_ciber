@@ -80,6 +80,7 @@ jobs:
   vendors:
     name: Scraping vendors (solo export JSON)
     runs-on: ubuntu-latest
+    timeout-minutes: 15
     needs: gatekeeper
     if: needs.gatekeeper.outputs.should_run == 'true'
     permissions:
@@ -113,6 +114,7 @@ jobs:
       # ⛔️ Ya NO enviamos mensajes por vendor; solo exportamos JSON
       - name: Export ${{ matrix.vendor }} to JSON (no notify)
         id: export
+        continue-on-error: true
         run: |
           echo "🔄 Iniciando scraping de ${{ matrix.vendor }}..."
           echo "   Timeout: 180s (3 min en CI para conexiones lentas)"
@@ -162,6 +164,7 @@ jobs:
   digest:
     name: Build & send digest (Telegram=texto, Teams=HTML)
     runs-on: ubuntu-latest
+    timeout-minutes: 10
     permissions:
       contents: read
     needs: vendors

@@ -31,7 +31,7 @@ from selenium.webdriver.support import expected_conditions as EC
 
 from common.browser import start_driver
 from common.notify import send_telegram, send_teams
-from common.utils import now_utc_str, now_utc_clean, collapse_ws
+from common.utils import now_utc_str, now_utc_clean, collapse_ws, today_utc
 
 SITES = [
     {
@@ -184,7 +184,7 @@ def parse_ssp_records_for_product(html: str, product_name: str) -> List[Dict[str
 # ---------- Solo HOY ----------
 
 def is_today_utc(dtobj: datetime) -> bool:
-    now = datetime.utcnow()
+    now = today_utc()
     return (dtobj.year, dtobj.month, dtobj.day) == (now.year, now.month, now.day)
 
 def summarize_today(records: List[Dict[str, Any]]) -> Dict[str, Any]:

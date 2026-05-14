@@ -26,7 +26,7 @@ from selenium.webdriver.support import expected_conditions as EC
 # Tu browser/notify originales para run()
 from common.browser import start_driver  # run() legacy
 from common.notify import send_telegram, send_teams
-from common.utils import now_utc_str, now_utc_clean, collapse_ws
+from common.utils import now_utc_str, now_utc_clean, collapse_ws, today_utc
 
 # Helper para fallback vía Statuspage
 try:
@@ -89,7 +89,7 @@ def parse_component_groups(soup: BeautifulSoup):
 # -------- Past Incidents: solo HOY --------
 
 def today_header_strings():
-    now = datetime.utcnow()
+    now = today_utc()
     with_zero = now.strftime("%b %d, %Y")
     no_zero  = with_zero.replace(" 0", " ")
     return {with_zero, no_zero}

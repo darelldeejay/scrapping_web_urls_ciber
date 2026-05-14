@@ -28,7 +28,7 @@ from selenium.webdriver.support import expected_conditions as EC
 # Notificaciones legacy (solo en run())
 from common.browser import start_driver
 from common.notify import send_telegram, send_teams
-from common.utils import now_utc_str, now_utc_clean, collapse_ws
+from common.utils import now_utc_str, now_utc_clean, collapse_ws, today_utc
 
 # Fallback a Statuspage (opcional)
 try:
@@ -65,7 +65,7 @@ def wait_for_page(driver):
 # ---------- Incidents: ONLY today's block ----------
 
 def today_header_strings():
-    now = datetime.utcnow()
+    now = today_utc()
     with_zero = now.strftime("%b %d, %Y")   # "Aug 17, 2025"
     no_zero  = with_zero.replace(" 0", " ") # "Aug 7, 2025"
     return {with_zero, no_zero}

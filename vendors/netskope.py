@@ -28,7 +28,7 @@ from selenium.webdriver.support import expected_conditions as EC
 
 from common.browser import start_driver
 from common.notify import send_telegram, send_teams
-from common.utils import now_utc_str, now_utc_clean, collapse_ws
+from common.utils import now_utc_str, now_utc_clean, collapse_ws, today_utc
 
 # =========================
 # Configuración
@@ -337,7 +337,7 @@ def analizar_netskope(driver) -> Tuple[List[dict], List[dict]]:
     ]
 
     # Filtrar 'pasados' a 15 días
-    now = datetime.utcnow().replace(tzinfo=timezone.utc)
+    now = today_utc()
     cutoff = now - timedelta(days=LOOKBACK_DAYS)
 
     def in_lookback(inc):

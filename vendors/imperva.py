@@ -27,7 +27,7 @@ from selenium.webdriver.support import expected_conditions as EC
 
 from common.browser import start_driver
 from common.notify import send_telegram, send_teams
-from common.utils import now_utc_str, now_utc_clean, collapse_ws
+from common.utils import now_utc_str, now_utc_clean, collapse_ws, today_utc
 
 # Fallback a Statuspage (opcional)
 try:
@@ -185,7 +185,7 @@ def today_header_strings():
     Genera múltiples formatos de fecha para hoy, para capturar diferentes
     formatos que Imperva podría usar.
     """
-    now = datetime.utcnow()
+    now = today_utc()
     formats = set()
     
     # Formato abreviado con cero: "Feb 01, 2026"

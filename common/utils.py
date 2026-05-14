@@ -26,3 +26,8 @@ def now_utc_clean() -> str:
 def collapse_ws(s: str) -> str:
     """Colapsa secuencias de espacios/saltos a un único espacio."""
     return re.sub(r"\s+", " ", s or "").strip()
+
+
+def today_utc() -> datetime:
+    """Datetime actual en UTC, timezone-aware. Reemplaza datetime.utcnow() (deprecated en 3.12+)."""
+    return datetime.now(timezone.utc)

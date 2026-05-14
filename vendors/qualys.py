@@ -25,7 +25,7 @@ from selenium.webdriver.support import expected_conditions as EC
 
 from common.browser import start_driver
 from common.notify import send_telegram, send_teams
-from common.utils import now_utc_str, now_utc_clean, collapse_ws
+from common.utils import now_utc_str, now_utc_clean, collapse_ws, today_utc
 
 URL = "https://status.qualys.com/history?filter=8f7fjwhmd4n0"
 SAVE_HTML = os.getenv("SAVE_HTML", "0") == "1"
@@ -145,7 +145,7 @@ def _parse_date_range(date_text: str, context_node):
         if md:
             right = f"{md.group(0)}, {right}"
 
-    year = _find_year_context(context_node) or datetime.utcnow().year
+    year = _find_year_context(context_node) or today_utc().year
     left_s  = _build_dt_strings(left, year)
     right_s = _build_dt_strings(right, year)
     sdt = _parse_with_tz_abbrev(left_s, tzabbr)  if left_s  else None

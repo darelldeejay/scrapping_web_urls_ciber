@@ -36,7 +36,7 @@ def _dt_local_madrid(dt_utc: datetime) -> str:
     month = dt_utc.month
     offset = offset_cest if 4 <= month <= 10 else offset_cet
     local = dt_utc.replace(tzinfo=timezone.utc).timestamp() + offset*3600
-    local_dt = datetime.utcfromtimestamp(local)
+    local_dt = datetime.fromtimestamp(local, tz=timezone.utc).replace(tzinfo=None)
     return local_dt.strftime("%Y-%m-%d %H:%M")
 
 def load_templates():
