@@ -113,26 +113,12 @@ jobs:
       # ⛔️ Ya NO enviamos mensajes por vendor; solo exportamos JSON
       - name: Export ${{ matrix.vendor }} to JSON (no notify)
         id: export
-        continue-on-error: true
         run: |
           echo "🔄 Iniciando scraping de ${{ matrix.vendor }}..."
-          echo "   Timeout: 180s (3 min en CI para conexiones lentas)"
-          
-          # Capturar timing
           START=$(date +%s)
-          
-          if python scripts/run_vendor.py --vendor ${{ matrix.vendor }} --export-json ".github/out/vendors/${{ matrix.vendor }}.json"; then
-            END=$(date +%s)
-            ELAPSED=$((END - START))
-            echo "✅ ${{ matrix.vendor }} completado exitosamente en ${ELAPSED}s"
-            echo "success=true" >> $GITHUB_OUTPUT
-          else
-            END=$(date +%s)
-            ELAPSED=$((END - START))
-            echo "❌ Error en ${{ matrix.vendor }} después de ${ELAPSED}s"
-            echo "success=false" >> $GITHUB_OUTPUT
-            exit 1
-          fi
+          python scripts/run_vendor.py --vendor ${{ matrix.vendor }} --export-json ".github/out/vendors/${{ matrix.vendor }}.json"
+          END=$(date +%s)
+          echo "✅ ${{ matrix.vendor }} completado en $((END - START))s"
 
       - name: Verify JSON was created
         run: |

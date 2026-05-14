@@ -30,39 +30,53 @@ def main():
     args = ap.parse_args()
 
     slug = args.vendor.strip().lower()
-    driver = make_driver(headless=args.headless)
-
-    # Carga módulo del vendor
-    try:
-        mod = importlib.import_module(f"vendors.{slug}")
-    except Exception as e:
-        driver.quit()
-        raise SystemExit(f"No se pudo importar vendors.{slug}: {e}")
-
-    # 1) Intentar collect() nativo del vendor
     data = None
-    try:
-        if hasattr(mod, "collect") and callable(getattr(mod, "collect")):
-            data = mod.collect(driver)  # debe devolver dict estándar
-    except Exception as exc:
-        logger.exception("[%s] collect() falló: %s", slug, exc)
-        data = None
+    driver = None
 
-    # 2) Fallback common
-    if data is None:
+    # Arrancar el browser — si falla, continuamos sin driver (llegamos al fallback mínimo)
+    try:
+        driver = make_driver(headless=args.headless)
+    except Exception as exc:
+        logger.exception("[%s] make_driver() falló: %s", slug, exc)
+
+    if driver is not None:
+        # Cargar módulo del vendor
+        mod = None
         try:
-            from common.fallback_collectors import get_collector
-            fn = get_collector(slug)
-        except Exception:
-            fn = None
-        if fn:
+            mod = importlib.import_module(f"vendors.{slug}")
+        except Exception as exc:
+            logger.exception("[%s] No se pudo importar vendors.%s: %s", slug, slug, exc)
+
+        # 1) Intentar collect() nativo del vendor
+        if mod is not None:
             try:
-                data = fn(driver)
-            except Exception:
+                if hasattr(mod, "collect") and callable(getattr(mod, "collect")):
+                    data = mod.collect(driver)  # debe devolver dict estándar
+            except Exception as exc:
+                logger.exception("[%s] collect() falló: %s", slug, exc)
                 data = None
 
-    # 3) Último recurso: mínimo
+        # 2) Fallback common
+        if data is None:
+            try:
+                from common.fallback_collectors import get_collector
+                fn = get_collector(slug)
+            except Exception:
+                fn = None
+            if fn:
+                try:
+                    data = fn(driver)
+                except Exception:
+                    data = None
+
+        try:
+            driver.quit()
+        except Exception:
+            pass  # browser puede haberse colgado o crasheado; no bloquear la escritura del JSON
+
+    # 3) Último recurso: mínimo — siempre producimos un JSON válido
     if not isinstance(data, dict):
+        logger.warning("[%s] Usando datos mínimos de fallback", slug)
         data = {
             "name": slug.title(),
             "timestamp_utc": now_utc_str(),
@@ -70,11 +84,6 @@ def main():
             "incidents_lines": ["No incidents reported today"],
             "overall_ok": None,
         }
-
-    try:
-        driver.quit()
-    except Exception:
-        pass  # browser puede haberse colgado o crasheado; no bloquear la escritura del JSON
 
     # Normalización mínima
     for k in ("component_lines", "incidents_lines"):
@@ -94,6 +103,7 @@ def main():
         os.makedirs(os.path.dirname(out), exist_ok=True)
         with open(out, "w", encoding="utf-8") as f:
             json.dump(data, f, ensure_ascii=False, indent=2)
+        logger.info("[%s] JSON escrito en %s", slug, out)
     else:
         # Camino "run" clásico: pequeño resumen a stdout (no notifica)
         logger.info("[%s] %s UTC", data.get('name'), data.get('timestamp_utc'))
