@@ -44,7 +44,8 @@ def main():
     try:
         if hasattr(mod, "collect") and callable(getattr(mod, "collect")):
             data = mod.collect(driver)  # debe devolver dict estándar
-    except Exception:
+    except Exception as exc:
+        logger.exception("[%s] collect() falló: %s", slug, exc)
         data = None
 
     # 2) Fallback common
@@ -70,7 +71,10 @@ def main():
             "overall_ok": None,
         }
 
-    driver.quit()
+    try:
+        driver.quit()
+    except Exception:
+        pass  # browser puede haberse colgado o crasheado; no bloquear la escritura del JSON
 
     # Normalización mínima
     for k in ("component_lines", "incidents_lines"):
