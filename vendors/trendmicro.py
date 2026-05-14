@@ -13,12 +13,12 @@ Reglas:
 - Si no hay incidentes de hoy, se muestra el literal de la página “No incidents reported today.”
 """
 
+import logging
 import os
 import re
 import time
 import html as htmlmod
 import json
-import traceback
 from datetime import datetime, timezone
 from urllib.parse import unquote
 from typing import List, Dict, Any, Tuple, Optional
@@ -32,6 +32,8 @@ from selenium.webdriver.support import expected_conditions as EC
 from common.browser import start_driver
 from common.notify import send_telegram, send_teams
 from common.utils import now_utc_str, now_utc_clean, collapse_ws, today_utc
+
+logger = logging.getLogger(__name__)
 
 SITES = [
     {
@@ -298,16 +300,13 @@ def run():
         ]
         msg = "\n".join(msg_lines)
 
-        print("\n===== TREND MICRO (COMBINED) =====")
-        print(msg)
-        print("==================================\n")
+        logger.info("===== TREND MICRO (COMBINED) =====\n%s\n==================================", msg)
 
         send_telegram(msg)
         send_teams(msg)
 
     except Exception as e:
-        print(f"[trendmicro] ERROR: {e}")
-        traceback.print_exc()
+        logger.exception("ERROR: %s", e)
         send_telegram(f"Trend Micro - Monitor\nError:\n{str(e)}")
         send_teams(f"❌ Trend Micro - Monitor\nError: {str(e)}")
         raise

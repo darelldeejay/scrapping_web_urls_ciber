@@ -16,12 +16,16 @@ if repo_root not in sys.path:
 
 # Arranque Selenium
 from common.browser import make_driver
+from common.logger import setup_logging, get_logger
 from bs4 import BeautifulSoup  # por si algún vendor lo usa internamente
+
+logger = get_logger(__name__)
 
 def now_utc_str():
     return datetime.now(timezone.utc).strftime("%Y-%m-%d %H:%M")
 
 def main():
+    setup_logging()
     ap = argparse.ArgumentParser(description="Run single vendor or export JSON for digest")
     ap.add_argument("--vendor", required=True, help="nombre del vendor (slug): aruba, cyberark, ...")
     ap.add_argument("--export-json", help="ruta de salida JSON con resumen para digest")
@@ -90,12 +94,12 @@ def main():
         with open(out, "w", encoding="utf-8") as f:
             json.dump(data, f, ensure_ascii=False, indent=2)
     else:
-        # Camino “run” clásico: imprime un pequeño resumen a stdout (no notifica)
-        print(f"[{data.get('name')}] {data.get('timestamp_utc')} UTC")
+        # Camino "run" clásico: pequeño resumen a stdout (no notifica)
+        logger.info("[%s] %s UTC", data.get('name'), data.get('timestamp_utc'))
         for ln in (data.get("component_lines") or []):
-            print(ln)
+            logger.info(ln)
         for ln in (data.get("incidents_lines") or []):
-            print(ln)
+            logger.info(ln)
 
 if __name__ == "__main__":
     main()

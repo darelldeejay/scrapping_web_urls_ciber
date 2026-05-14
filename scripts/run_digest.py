@@ -12,6 +12,7 @@ import requests
 import sys
 sys.path.insert(0, os.path.abspath(os.path.join(os.path.dirname(__file__), '..')))
 from common.config import ClientConfig
+from common.logger import setup_logging, get_logger
 from common.templates import (
     load_text_template,
     load_html_template,
@@ -21,6 +22,8 @@ from common.templates import (
 )
 
 # ---------------- Utilidades ----------------
+
+logger = get_logger(__name__)
 
 def is_truthy_env(name: str) -> bool:
     return os.getenv(name, "").strip().lower() in ("1", "true", "yes", "y", "on")
@@ -127,6 +130,7 @@ def write_preview(preview_dir: str, subject: str, html_block_md: str, html_body:
 # ---------------- Main ----------------
 
 def main():
+    setup_logging()
     ap = argparse.ArgumentParser(description="Enviar plantillas DORA como mensaje 'pegable' a Telegram/Teams")
     ap.add_argument("--text-template", default="templates/dora_email.txt")
     ap.add_argument("--html-template", default="templates/dora_email.html")
@@ -167,7 +171,7 @@ def main():
         preview_dir = args.preview_out or ".github/out/preview"
         # Siempre guardamos el cuerpo TXT (como estaba), y añadimos el HTML real.
         write_preview(preview_dir, subject, html_block, html_body, text_body)
-        print(f"[preview] Escribí previsualización en: {preview_dir}")
+        logger.info("Previsualizaci\u00f3n escrita en: %s", preview_dir)
         return
 
     errors: List[str] = []

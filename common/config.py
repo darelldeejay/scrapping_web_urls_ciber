@@ -5,9 +5,12 @@ Permite que el repositorio sea escalable para múltiples clientes
 manteniendo datos sensibles privados en .env (no commiteado).
 """
 
+import logging
 import os
 from pathlib import Path
 from typing import Optional
+
+logger = logging.getLogger(__name__)
 
 
 class ClientConfig:
@@ -68,8 +71,8 @@ class ClientConfig:
     def validate(self) -> bool:
         """Validar que configuración necesaria esté presente"""
         if not self.client_name or self.client_name == "CLIENTE GENÉRICO":
-            print(
-                "⚠️  ADVERTENCIA: CLIENT_NAME no configurado. "
+            logger.warning(
+                "CLIENT_NAME no configurado. "
                 "Copiar .env.example a .env y rellenar datos del cliente."
             )
             return False
@@ -101,7 +104,7 @@ def load_env_file(env_path: str = ".env") -> None:
     """
     env_file = Path(env_path)
     if not env_file.exists():
-        print(f"⚠️  {env_path} no encontrado. Usando valores por defecto.")
+        logger.warning("%s no encontrado. Usando valores por defecto.", env_path)
         return
 
     with open(env_file) as f:

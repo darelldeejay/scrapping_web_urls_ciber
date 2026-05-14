@@ -11,10 +11,10 @@ Qualys — History:
   * Proveer collect(driver) para el digest.
 """
 
+import logging
 import os
 import re
 import time
-import traceback
 from datetime import datetime, timezone, timedelta
 from typing import List, Dict, Any, Tuple, Optional
 
@@ -26,6 +26,8 @@ from selenium.webdriver.support import expected_conditions as EC
 from common.browser import start_driver
 from common.notify import send_telegram, send_teams
 from common.utils import now_utc_str, now_utc_clean, collapse_ws, today_utc
+
+logger = logging.getLogger(__name__)
 
 URL = "https://status.qualys.com/history?filter=8f7fjwhmd4n0"
 SAVE_HTML = os.getenv("SAVE_HTML", "0") == "1"
@@ -340,24 +342,21 @@ def run():
             try:
                 with open("qualys_page_source.html", "w", encoding="utf-8") as f:
                     f.write(html)
-                print("💾 HTML guardado en qualys_page_source.html")
+                logger.debug("💾 HTML guardado en qualys_page_source.html")
             except Exception as e:
-                print(f"No se pudo guardar HTML: {e}")
+                logger.debug("No se pudo guardar HTML: %s", e)
 
         soup = BeautifulSoup(html, "lxml")
         items = _extract_items(soup)
         resumen = format_message(items)
 
-        print("\n===== QUALYS =====")
-        print(resumen)
-        print("==================\n")
+        logger.info("===== QUALYS =====\n%s\n==================", resumen)
 
         send_telegram(resumen)
         send_teams(resumen)
 
     except Exception as e:
-        print(f"[qualys] ERROR: {e}")
-        traceback.print_exc()
+        logger.exception("ERROR: %s", e)
         send_telegram(f"Qualys - Monitor\nError:\n{str(e)}")
         send_teams(f"❌ Qualys - Monitor\nError: {str(e)}")
         raise

@@ -13,10 +13,10 @@ Reglas aplicadas:
 - Fechas normalizadas a UTC.
 """
 
+import logging
 import os
 import re
 import time
-import traceback
 from datetime import datetime, timedelta, timezone
 from typing import List, Tuple, Optional
 
@@ -29,6 +29,8 @@ from selenium.webdriver.support import expected_conditions as EC
 from common.browser import start_driver
 from common.notify import send_telegram, send_teams
 from common.utils import now_utc_str, now_utc_clean, collapse_ws, today_utc
+
+logger = logging.getLogger(__name__)
 
 # =========================
 # Configuración
@@ -270,7 +272,7 @@ def dedup_incidents(items: List[dict]) -> List[dict]:
 # Scrape + clasificación
 # =========================
 def analizar_netskope(driver) -> Tuple[List[dict], List[dict]]:
-    print("🔍 Cargando Netskope…")
+    logger.info("🔍 Cargando Netskope…")
     driver.get(NETSKOPE_URL)
     wait_for_page(driver)
 
@@ -316,9 +318,9 @@ def analizar_netskope(driver) -> Tuple[List[dict], List[dict]]:
         try:
             with open("netskope_page_source.html", "w", encoding="utf-8") as f:
                 f.write(html)
-            print("💾 HTML guardado en netskope_page_source.html")
-        except Exception as e:
-            print(f"No se pudo guardar HTML: {e}")
+logger.debug("💾 HTML guardado en netskope_page_source.html")
+            except Exception as e:
+                logger.debug("No se pudo guardar HTML: %s", e)
 
     soup = BeautifulSoup(html, "lxml")
     open_cards, past_cards = extract_sections_strict(soup)
@@ -461,15 +463,12 @@ def run():
         activos, pasados_15 = analizar_netskope(driver)
         resumen = format_message(activos, pasados_15)
 
-        print("\n===== NETSKOPE =====")
-        print(resumen)
-        print("====================\n")
+        logger.info("===== NETSKOPE =====\n%s\n====================", resumen)
 
         send_telegram(resumen)
         send_teams(resumen)
     except Exception as e:
-        print(f"[netskope] ERROR: {e}")
-        traceback.print_exc()
+        logger.exception("ERROR: %s", e)
         send_telegram(f"Netskope - Monitor\nError:\n{str(e)}")
         send_teams(f"❌ Netskope - Monitor\nError: {str(e)}")
         raise

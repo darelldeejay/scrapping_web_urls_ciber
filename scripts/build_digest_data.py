@@ -16,6 +16,7 @@ Construye el JSON de datos para las plantillas DORA (txt y html).
 Este script NO envía nada; solo prepara datos para run_digest.py.
 """
 
+import logging
 import os
 import re
 import json
@@ -27,6 +28,12 @@ from typing import Dict, Any, List, Tuple
 # ---------------------------------------------------------------------------
 # Fuentes (mantener sincronizadas con vendors soportados)
 # ---------------------------------------------------------------------------
+
+import sys
+sys.path.insert(0, os.path.abspath(os.path.join(os.path.dirname(__file__), '..')))
+from common.logger import setup_logging, get_logger
+
+logger = get_logger(__name__)
 
 SOURCES = [
     ("Aruba Central — Status", "https://centralstatus.arubanetworking.hpe.com/"),
@@ -236,6 +243,7 @@ def next_report_date_utc_str() -> str:
 # ---------------------------------------------------------------------------
 
 def main():
+    setup_logging()
     ap = argparse.ArgumentParser(description="Construye digest_data.json para plantillas DORA")
     ap.add_argument("--vendors-dir", required=True, help="Directorio con JSON exportados por vendor")
     ap.add_argument("--out", required=True, help="Ruta de salida del JSON compuesto")
@@ -307,7 +315,7 @@ def main():
     with open(args.out, "w", encoding="utf-8") as f:
         json.dump(out_data, f, ensure_ascii=False, indent=2)
 
-    print(f"[digest-data] OK → {args.out} ({len(vendors)} vendors)")
+    logger.info("OK → %s (%d vendors)", args.out, len(vendors))
 
 if __name__ == "__main__":
     main()

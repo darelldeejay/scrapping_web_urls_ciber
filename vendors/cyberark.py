@@ -15,6 +15,7 @@ Salida normalizada para el digest:
 - overall_ok: True si banner OK y sin incidentes de hoy
 """
 
+import logging
 import os
 import re
 import time
@@ -29,6 +30,8 @@ from selenium.webdriver.support import expected_conditions as EC
 from common.browser import start_driver
 from common.notify import send_telegram, send_teams
 from common.utils import now_utc_str, now_utc_clean, collapse_ws, today_utc
+
+logger = logging.getLogger(__name__)
 
 # Fallback a Statuspage (opcional)
 try:
@@ -242,9 +245,9 @@ def run():
             try:
                 with open("cyberark_page_source.html", "w", encoding="utf-8") as f:
                     f.write(html)
-                print("💾 HTML saved to cyberark_page_source.html")
+                logger.debug("💾 HTML guardado en cyberark_page_source.html")
             except Exception as e:
-                print(f"Could not save HTML: {e}")
+                logger.debug("No se pudo guardar HTML: %s", e)
 
         soup = BeautifulSoup(html, "lxml")
 
@@ -257,15 +260,13 @@ def run():
         today_inc = parse_incidents_today(soup)
 
         msg = format_message(system_status_text, today_inc)
-        print("\n===== CYBERARK =====")
-        print(msg)
-        print("====================\n")
+        logger.info("===== CYBERARK =====\n%s\n====================", msg)
 
         send_telegram(msg)
         send_teams(msg)
 
     except Exception as e:
-        print(f"[cyberark] ERROR: {e}")
+        logger.exception("ERROR: %s", e)
         send_telegram(f"CyberArk Privilege Cloud - Monitor\nError:\n{str(e)}")
         send_teams(f"❌ CyberArk Privilege Cloud - Monitor\nError: {str(e)}")
         raise

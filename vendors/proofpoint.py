@@ -13,10 +13,10 @@ Reglas aplicadas:
   y se intenta adjuntar su URL (si existe).
 """
 
+import logging
 import os
 import re
 import time
-import traceback
 from datetime import datetime, timezone
 from typing import List, Dict, Any, Tuple, Optional
 
@@ -28,6 +28,8 @@ from selenium.webdriver.support import expected_conditions as EC
 from common.browser import start_driver
 from common.notify import send_telegram, send_teams
 from common.utils import now_utc_str, now_utc_clean, collapse_ws
+
+logger = logging.getLogger(__name__)
 
 URL = "https://proofpoint.my.site.com/community/s/proofpoint-current-incidents"
 SAVE_HTML = os.getenv("SAVE_HTML", "0") == "1"
@@ -238,23 +240,20 @@ def run():
             try:
                 with open("proofpoint_page_source.html", "w", encoding="utf-8") as f:
                     f.write(html)
-                print("💾 HTML guardado en proofpoint_page_source.html")
+                logger.debug("💾 HTML guardado en proofpoint_page_source.html")
             except Exception as e:
-                print(f"No se pudo guardar HTML: {e}")
+                logger.debug("No se pudo guardar HTML: %s", e)
 
         activos, pasados, banner_text = parse_incidents_from_html(html)
 
         resumen = format_message(activos, banner_text)
-        print("\n===== PROOFPOINT =====")
-        print(resumen)
-        print("======================\n")
+        logger.info("===== PROOFPOINT =====\n%s\n======================", resumen)
 
         send_telegram(resumen)
         send_teams(resumen)
 
     except Exception as e:
-        print(f"[proofpoint] ERROR: {e}")
-        traceback.print_exc()
+        logger.exception("ERROR: %s", e)
         # Mensajes simples, sin HTML
         send_telegram(f"Proofpoint - Monitor\nError:\n{str(e)}")
         send_teams(f"❌ Proofpoint - Monitor\nError: {str(e)}")

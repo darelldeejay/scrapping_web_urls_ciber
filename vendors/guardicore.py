@@ -10,11 +10,11 @@ Esto permite conservar todo tu trabajo previo y, a la vez, alimentar el digest
 con datos correctos y estables.
 """
 
+import logging
 import os
 import re
 import time
 import json
-import traceback
 from datetime import datetime, timezone
 
 from bs4 import BeautifulSoup
@@ -27,6 +27,8 @@ from selenium.webdriver.support import expected_conditions as EC
 from common.browser import start_driver  # run() legacy
 from common.notify import send_telegram, send_teams
 from common.utils import now_utc_str, now_utc_clean, collapse_ws, today_utc
+
+logger = logging.getLogger(__name__)
 
 # Helper para fallback vía Statuspage
 try:
@@ -301,7 +303,7 @@ def run():
         try:
             driver.get(URL)
         except TimeoutException:
-            print("⏱️ Page load timed out — using partial DOM (window.stop()).")
+            logger.debug("⏱️ Page load timed out — using partial DOM (window.stop()).")
             try:
                 driver.execute_script("window.stop();")
             except Exception:
@@ -310,25 +312,23 @@ def run():
         try:
             wait_for_page(driver)
         except Exception:
-            print("⚠️ Could not confirm page readiness, proceeding with available DOM.")
+            logger.debug("⚠️ Could not confirm page readiness, proceeding with available DOM.")
 
         html = driver.page_source
         if SAVE_HTML:
             try:
                 with open("akamai_page_source.html", "w", encoding="utf-8") as f:
                     f.write(html)
-                print("💾 HTML saved to akamai_page_source.html")
+                logger.debug("💾 HTML guardado en akamai_page_source.html")
             except Exception as e:
-                print(f"Could not save HTML: {e}")
+                logger.debug("No se pudo guardar HTML: %s", e)
 
         soup = BeautifulSoup(html, "lxml")
         groups = parse_component_groups(soup)
         today_inc = parse_incidents_today(soup)
 
         msg = format_message(groups, today_inc)
-        print("\n===== AKAMAI (GUARDICORE) =====")
-        print(msg)
-        print("================================\n")
+        logger.info("===== AKAMAI (GUARDICORE) =====\n%s\n================================", msg)
 
         # Notificaciones legacy (tu camino anterior)
         send_telegram(msg)
@@ -338,8 +338,7 @@ def run():
         short = f"{type(e).__name__}: {str(e)}"
         if len(short) > 300:
             short = short[:300] + "…"
-        print(f"[guardicore] ERROR: {short}")
-        traceback.print_exc()
+        logger.exception("ERROR: %s", short)
         send_telegram(f"Akamai (Guardicore) - Monitor\nError: {short}")
         send_teams(f"❌ Akamai (Guardicore) - Monitor\nError: {short}")
         raise

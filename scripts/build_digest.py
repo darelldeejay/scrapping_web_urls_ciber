@@ -1,4 +1,5 @@
 # build_digest.py
+import logging
 import os
 import sys
 import importlib
@@ -14,6 +15,9 @@ if repo_root not in sys.path:
 from common.browser import start_driver
 from common.notify import send_telegram, send_teams
 from common.mailer import send_email_smtp
+from common.logger import setup_logging, get_logger
+
+logger = get_logger(__name__)
 
 # Vendors a incluir en el digest (nombre -> módulo)
 VENDORS = {
@@ -114,6 +118,7 @@ def send_outputs(html_body: str, text_body: str):
     send_teams(text_body)
 
 def main():
+    setup_logging()
     driver = start_driver()
     try:
         vendors_collected = []
@@ -136,7 +141,7 @@ def main():
 
         html, text = render_outputs(vendors_collected)
         send_outputs(html, text)
-        print("Digest built and sent.")
+        logger.info("Digest generado y enviado.")
     finally:
         try:
             driver.quit()

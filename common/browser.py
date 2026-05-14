@@ -1,12 +1,15 @@
 # -*- coding: utf-8 -*-
 from __future__ import annotations
 
+import logging
 import os
 import time
 from selenium import webdriver
 from selenium.webdriver.chrome.options import Options
 from selenium.webdriver.support.ui import WebDriverWait
 from selenium.common.exceptions import TimeoutException, WebDriverException
+
+logger = logging.getLogger(__name__)
 
 def make_driver(headless: bool = True, page_load_timeout: int = None) -> webdriver.Chrome:
     """
@@ -51,7 +54,7 @@ def make_driver(headless: bool = True, page_load_timeout: int = None) -> webdriv
     
     # Debug logging en CI
     if is_ci:
-        print(f"[BROWSER] CI mode detectado: page_load_timeout={page_load_timeout}s, script_timeout={120}s", flush=True)
+        logger.info("CI mode detectado: page_load_timeout=%ds, script_timeout=%ds", page_load_timeout, 120)
     
     return driver
 

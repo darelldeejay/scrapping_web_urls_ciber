@@ -14,10 +14,10 @@ Salida normalizada para el digest:
 - overall_ok: True si no hay incidentes hoy y todos los componentes están OK
 """
 
+import logging
 import os
 import re
 import time
-import traceback
 from datetime import datetime, timezone
 
 from bs4 import BeautifulSoup
@@ -28,6 +28,8 @@ from selenium.webdriver.support import expected_conditions as EC
 from common.browser import start_driver
 from common.notify import send_telegram, send_teams
 from common.utils import now_utc_str, now_utc_clean, collapse_ws, today_utc
+
+logger = logging.getLogger(__name__)
 
 # Fallback a Statuspage (opcional)
 try:
@@ -522,25 +524,22 @@ def run():
             try:
                 with open("imperva_page_source.html", "w", encoding="utf-8") as f:
                     f.write(html)
-                print("💾 HTML saved to imperva_page_source.html")
+                logger.debug("💾 HTML guardado en imperva_page_source.html")
             except Exception as e:
-                print(f"Could not save HTML: {e}")
+                logger.debug("No se pudo guardar HTML: %s", e)
 
         soup = BeautifulSoup(html, "lxml")
         comps = parse_components(soup)
         today_inc = parse_incidents_today(soup)
 
         msg = format_message(comps, today_inc)
-        print("\n===== IMPERVA =====")
-        print(msg)
-        print("===================\n")
+        logger.info("===== IMPERVA =====\n%s\n===================", msg)
 
         send_telegram(msg)
         send_teams(msg)
 
     except Exception as e:
-        print(f"[imperva] ERROR: {e}")
-        traceback.print_exc()
+        logger.exception("ERROR: %s", e)
         send_telegram(f"Imperva - Monitor\nError:\n{str(e)}")
         send_teams(f"❌ Imperva - Monitor\nError: {str(e)}")
         raise

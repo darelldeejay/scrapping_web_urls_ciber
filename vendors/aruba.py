@@ -9,10 +9,10 @@ Aruba Central — soporte dual:
 Así conservas toda la depuración previa y el digest recibe datos correctos.
 """
 
+import logging
 import os
 import re
 import time
-import traceback
 from datetime import datetime, timezone
 
 from bs4 import BeautifulSoup
@@ -24,6 +24,8 @@ from selenium.webdriver.support import expected_conditions as EC
 from common.browser import start_driver
 from common.notify import send_telegram, send_teams
 from common.utils import now_utc_str, now_utc_clean, collapse_ws
+
+logger = logging.getLogger(__name__)
 
 # Helper para fallback vía Statuspage (opcional)
 try:
@@ -266,26 +268,23 @@ def run():
             try:
                 with open("aruba_page_source.html", "w", encoding="utf-8") as f:
                     f.write(html)
-                print("💾 HTML saved to aruba_page_source.html")
+                logger.debug("💾 HTML guardado en aruba_page_source.html")
             except Exception as e:
-                print(f"Could not save HTML: {e}")
+                logger.debug("No se pudo guardar HTML: %s", e)
 
         soup = BeautifulSoup(html, "lxml")
         comps = parse_components(soup)
         today = parse_incidents_today(soup)
 
         msg = format_message(comps, today)
-        print("\n===== ARUBA =====")
-        print(msg)
-        print("=================\n")
+        logger.info("===== ARUBA =====\n%s\n=================", msg)
 
         # Notificaciones legacy
         send_telegram(msg)
         send_teams(msg)
 
     except Exception as e:
-        print(f"[aruba] ERROR: {e}")
-        traceback.print_exc()
+        logger.exception("ERROR: %s", e)
         send_telegram(f"Aruba Central - Monitor\nError:\n{str(e)}")
         send_teams(f"❌ Aruba Central - Monitor\nError: {str(e)}")
         raise
