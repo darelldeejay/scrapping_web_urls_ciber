@@ -97,9 +97,9 @@ jobs:
           echo "CLIENT_CODE=${{ vars.CLIENT_CODE }}" >> $GITHUB_ENV
           echo "EMAIL_CONFIDENTIAL_FOOTER=${{ vars.EMAIL_CONFIDENTIAL_FOOTER }}" >> $GITHUB_ENV
           # Agrega aquí otros secrets relevantes si los usas
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v6
 
-      - uses: actions/setup-python@v5
+      - uses: actions/setup-python@v6
         with:
           python-version: "3.10"
           cache: pip
@@ -153,7 +153,7 @@ jobs:
 
       - name: Upload vendor summary (per-vendor artifact)
         if: always()
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v7
         with:
           name: vendor-${{ matrix.vendor }}
           path: .github/out/vendors/${{ matrix.vendor }}.json
@@ -169,9 +169,9 @@ jobs:
     needs: vendors
     if: always()
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v6
 
-      - uses: actions/setup-python@v5
+      - uses: actions/setup-python@v6
         with:
           python-version: "3.10"
           cache: pip
@@ -180,7 +180,7 @@ jobs:
         run: pip install -r requirements.txt
 
       - name: Download vendor artifacts
-        uses: actions/download-artifact@v4
+        uses: actions/download-artifact@v8
         with:
           path: .github/out
           pattern: vendor-*
@@ -385,7 +385,7 @@ jobs:
 
       - name: Upload digest preview
         if: ${{ env.NOTIFY_DRY_RUN == 'true' }}
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v7
         with:
           name: digest-preview
           path: |
