@@ -102,11 +102,10 @@ jobs:
       - uses: actions/setup-python@v6
         with:
           python-version: "3.10"
+          cache: pip
 
       - name: Install deps
-        run: |
-          python -m pip install --upgrade pip
-          pip install -r requirements.txt
+        run: pip install -r requirements.txt
 
       - name: Prepare out dirs
         run: mkdir -p .github/out/vendors
@@ -154,7 +153,7 @@ jobs:
 
       - name: Upload vendor summary (per-vendor artifact)
         if: always()
-        uses: actions/upload-artifact@v7  
+        uses: actions/upload-artifact@v8
         with:
           name: vendor-${{ matrix.vendor }}
           path: .github/out/vendors/${{ matrix.vendor }}.json
@@ -172,14 +171,13 @@ jobs:
     steps:
       - uses: actions/checkout@v6
 
-      - uses: actions/setup-python@v6     
+      - uses: actions/setup-python@v6
         with:
           python-version: "3.10"
+          cache: pip
 
       - name: Install deps
-        run: |
-          python -m pip install --upgrade pip
-          pip install -r requirements.txt
+        run: pip install -r requirements.txt
 
       - name: Download vendor artifacts
         uses: actions/download-artifact@v8
