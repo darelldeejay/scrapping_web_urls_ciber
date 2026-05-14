@@ -28,6 +28,7 @@ from selenium.webdriver.support import expected_conditions as EC
 
 from common.browser import start_driver
 from common.notify import send_telegram, send_teams
+from common.utils import now_utc_str, now_utc_clean, collapse_ws
 
 # =========================
 # Configuración
@@ -43,14 +44,7 @@ MONTHS = "Jan|Feb|Mar|Apr|May|Jun|Jul|Aug|Sep|Oct|Nov|Dec|Ene|Feb|Mar|Abr|May|Ju
 DATE_REGEX_LOOSE = rf"({MONTHS})\s+\d{{1,2}}(?:,\s*\d{{4}})?(?:\s*,?\s*\d{{1,2}}:\d{{2}}\s*(?:AM|PM)?(?:\s*(?:UTC|GMT|[A-Z]{{2,4}}))?)?"
 STATUS_TOKENS = ["Resolved", "Mitigated", "Monitoring", "Identified", "Investigating", "Degraded", "Update"]
 
-def now_utc_str() -> str:
-    return datetime.utcnow().strftime("%Y-%m-%d %H:%M UTC")
 
-def _now_utc_clean() -> str:
-    return datetime.now(timezone.utc).strftime("%Y-%m-%d %H:%M")
-
-def collapse_ws(s: str) -> str:
-    return re.sub(r"\s+", " ", s or "").strip()
 
 def parse_datetime_any(text: str) -> Optional[datetime]:
     try:
@@ -452,7 +446,7 @@ def collect(driver):
 
     return {
         "name": "Netskope",
-        "timestamp_utc": _now_utc_clean(),
+        "timestamp_utc": now_utc_clean(),
         "component_lines": component_lines,
         "incidents_lines": incidents_lines,
         "overall_ok": overall_ok,

@@ -25,6 +25,7 @@ from selenium.webdriver.support import expected_conditions as EC
 
 from common.browser import start_driver
 from common.notify import send_telegram, send_teams
+from common.utils import now_utc_str, now_utc_clean, collapse_ws
 
 URL = "https://status.qualys.com/history?filter=8f7fjwhmd4n0"
 SAVE_HTML = os.getenv("SAVE_HTML", "0") == "1"
@@ -55,15 +56,8 @@ TZ_OFFSETS_MIN = {
 
 # ------------------ Utilidades básicas ------------------
 
-def _collapse_ws(s: str) -> str:
-    return re.sub(r"\s+", " ", s or "").strip()
-
-def now_utc_str() -> str:
-    return datetime.utcnow().strftime("%Y-%m-%d %H:%M UTC")
-
-def _now_utc_clean() -> str:
-    """Para export JSON: sin el sufijo 'UTC'; el renderer lo añadirá si procede."""
-    return datetime.now(timezone.utc).strftime("%Y-%m-%d %H:%M")
+# Alias local para compatibilidad interna (se usa ampliamente en este módulo)
+_collapse_ws = collapse_ws
 
 def wait_for_page(driver):
     # Espera a que haya enlaces y que aparezca algún rango horario en el body (render dinámico)
@@ -327,7 +321,7 @@ def collect(driver) -> Dict[str, Any]:
 
     return {
         "name": "Qualys",
-        "timestamp_utc": _now_utc_clean(),
+        "timestamp_utc": now_utc_clean(),
         "component_lines": [],                    # Qualys no expone "componentes" aquí
         "incidents_lines": _format_incidents_lines_for_digest(items),
         "overall_ok": len(items) == 0,            # si hay items no programados, overall_ok = False

@@ -23,6 +23,7 @@ from selenium.webdriver.support import expected_conditions as EC
 # Camino legacy de notificación
 from common.browser import start_driver
 from common.notify import send_telegram, send_teams
+from common.utils import now_utc_str, now_utc_clean, collapse_ws
 
 # Helper para fallback vía Statuspage (opcional)
 try:
@@ -39,16 +40,7 @@ ISSUE_STATUS_RE = re.compile(r"(Degraded Performance|Partial Outage|Major Outage
 OPERATIONAL_RE = re.compile(r"\bOperational\b", re.I)
 NO_INCIDENTS_TODAY_RE = re.compile(r"No incidents reported today", re.I)
 
-def now_utc_str():
-    # Mensajes legacy
-    return datetime.utcnow().strftime("%Y-%m-%d %H:%M UTC")
 
-def _now_utc_clean():
-    # Para export JSON (el digest añade 'UTC')
-    return datetime.now(timezone.utc).strftime("%Y-%m-%d %H:%M")
-
-def collapse_ws(s: str) -> str:
-    return re.sub(r"\s+", " ", s or "").strip()
 
 def wait_for_page(driver):
     WebDriverWait(driver, 25).until(EC.presence_of_element_located((By.TAG_NAME, "body")))
@@ -237,7 +229,7 @@ def collect(driver):
         if component_lines or (incidents_lines and incidents_lines != ["- (Incidents reported today — see details on the website)"]):
             return {
                 "name": "Aruba Central",
-                "timestamp_utc": _now_utc_clean(),  # sin sufijo "UTC"
+                "timestamp_utc": now_utc_clean(),  # sin sufijo "UTC"
                 "component_lines": component_lines,
                 "incidents_lines": incidents_lines,
                 "overall_ok": overall_ok,
@@ -255,7 +247,7 @@ def collect(driver):
     # Último recurso: sin datos
     return {
         "name": "Aruba Central",
-        "timestamp_utc": _now_utc_clean(),
+        "timestamp_utc": now_utc_clean(),
         "component_lines": [],
         "incidents_lines": ["No incidents reported today."],
         "overall_ok": None,

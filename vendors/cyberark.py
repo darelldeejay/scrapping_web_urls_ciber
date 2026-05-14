@@ -28,6 +28,7 @@ from selenium.webdriver.support import expected_conditions as EC
 # Notificaciones legacy (solo en run())
 from common.browser import start_driver
 from common.notify import send_telegram, send_teams
+from common.utils import now_utc_str, now_utc_clean, collapse_ws
 
 # Fallback a Statuspage (opcional)
 try:
@@ -43,16 +44,7 @@ SAVE_HTML = os.getenv("SAVE_HTML", "0") == "1"
 ALL_OK_RE = re.compile(r"All Systems Operational", re.I)
 NO_INCIDENTS_TODAY_RE = re.compile(r"No incidents reported today", re.I)
 
-def now_utc_str():
-    # Mensajes legacy (con sufijo "UTC")
-    return datetime.utcnow().strftime("%Y-%m-%d %H:%M UTC")
 
-def _now_utc_clean():
-    # Para export JSON (el digest añade 'UTC' al renderizar)
-    return datetime.now(timezone.utc).strftime("%Y-%m-%d %H:%M")
-
-def collapse_ws(s: str) -> str:
-    return re.sub(r"\s+", " ", s or "").strip()
 
 def wait_for_page(driver):
     WebDriverWait(driver, 25).until(EC.presence_of_element_located((By.TAG_NAME, "body")))
@@ -212,7 +204,7 @@ def collect(driver):
         # component_lines vacío para no duplicar el banner en "Component status"
         return {
             "name": "CyberArk Privilege Cloud",
-            "timestamp_utc": _now_utc_clean(),
+            "timestamp_utc": now_utc_clean(),
             "banner": banner_line,
             "component_lines": [],
             "incidents_lines": incidents_lines,
@@ -230,7 +222,7 @@ def collect(driver):
     # Último recurso
     return {
         "name": "CyberArk Privilege Cloud",
-        "timestamp_utc": _now_utc_clean(),
+        "timestamp_utc": now_utc_clean(),
         "banner": "",
         "component_lines": [],
         "incidents_lines": ["No incidents reported today."],

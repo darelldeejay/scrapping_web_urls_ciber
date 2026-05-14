@@ -27,6 +27,7 @@ from selenium.webdriver.support import expected_conditions as EC
 
 from common.browser import start_driver
 from common.notify import send_telegram, send_teams
+from common.utils import now_utc_str, now_utc_clean, collapse_ws
 
 URL = "https://proofpoint.my.site.com/community/s/proofpoint-current-incidents"
 SAVE_HTML = os.getenv("SAVE_HTML", "0") == "1"
@@ -36,16 +37,7 @@ INCIDENT_ID_RE = re.compile(r"\bIncident\s+\d+\b", re.I)
 
 # ---------------- Utilidades ---------------- #
 
-def now_utc_str() -> str:
-    """Para mensajes legacy: con sufijo explícito UTC."""
-    return datetime.utcnow().strftime("%Y-%m-%d %H:%M UTC")
 
-def _now_utc_clean() -> str:
-    """Para export JSON: sin 'UTC' (se añade al render del digest)."""
-    return datetime.now(timezone.utc).strftime("%Y-%m-%d %H:%M")
-
-def collapse_ws(s: str) -> str:
-    return re.sub(r"\s+", " ", s or "").strip()
 
 def wait_for_page(driver) -> None:
     """
@@ -222,7 +214,7 @@ def collect(driver) -> Dict[str, Any]:
 
     out: Dict[str, Any] = {
         "name": "Proofpoint",
-        "timestamp_utc": _now_utc_clean(),
+        "timestamp_utc": now_utc_clean(),
         "component_lines": component_lines,
         "incidents_lines": incidents_lines,
         "overall_ok": overall_ok,

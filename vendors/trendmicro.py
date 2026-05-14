@@ -31,6 +31,7 @@ from selenium.webdriver.support import expected_conditions as EC
 
 from common.browser import start_driver
 from common.notify import send_telegram, send_teams
+from common.utils import now_utc_str, now_utc_clean, collapse_ws
 
 SITES = [
     {
@@ -61,15 +62,7 @@ STATUS_MAP = {
 
 # ---------------- Utilidades ---------------- #
 
-def now_utc_str() -> str:
-    return datetime.utcnow().strftime("%Y-%m-%d %H:%M UTC")
 
-def _now_utc_clean() -> str:
-    """Para export JSON (sin sufijo 'UTC'; lo añade el renderer)."""
-    return datetime.now(timezone.utc).strftime("%Y-%m-%d %H:%M")
-
-def collapse_ws(s: str) -> str:
-    return re.sub(r"\s+", " ", s or "").strip()
 
 def wait_for_page(driver) -> None:
     """
@@ -272,7 +265,7 @@ def collect(driver) -> Dict[str, Any]:
 
     return {
         "name": "Trend Micro",
-        "timestamp_utc": _now_utc_clean(),
+        "timestamp_utc": now_utc_clean(),
         "component_lines": [],            # Trend no expone “componentes” en estas páginas
         "incidents_lines": sections,      # cada bloque como párrafo independiente
         "overall_ok": (total_today == 0),

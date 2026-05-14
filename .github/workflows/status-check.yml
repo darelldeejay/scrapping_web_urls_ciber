@@ -30,9 +30,8 @@ on:
         default: ""
         type: string
   schedule:
-    # 🔴 CRON: Se ejecuta automáticamente a las 09:00 Madrid (UTC+1 o +2)
-    # UTC times: 7:00 (invierno CET), 6:00 (verano CEST)
-    - cron: "0 7 * * *"
+    # � CRON: Una sola entrada a las 08:00 UTC (entre UTC+1 y UTC+2 para Madrid).
+    # El job gatekeeper verifica que la hora en Madrid sea las 09:xx antes de continuar.
     - cron: "0 8 * * *"
 
 concurrency:
@@ -50,12 +49,37 @@ env:
   DEFAULT_DRY_RUN: "false"        # CRON ENVÍA DE VERDAD (no preview)
 
 jobs:
+  gatekeeper:
+    name: "Verificar horario (Madrid 09:00)"
+    runs-on: ubuntu-latest
+    outputs:
+      should_run: ${{ steps.check.outputs.should_run }}
+    steps:
+      - name: Check Madrid time
+        id: check
+        run: |
+          if [ "${{ github.event_name }}" != "schedule" ]; then
+            echo "✅ Dispatch manual: sin restricción horaria."
+            echo "should_run=true" >> $GITHUB_OUTPUT
+            exit 0
+          fi
+          HORA_MADRID=$(TZ="Europe/Madrid" date +%H)
+          echo "Hora en Madrid: $HORA_MADRID"
+          if [ "$HORA_MADRID" = "09" ]; then
+            echo "✅ Son las 09:xx en Madrid. Procediendo."
+            echo "should_run=true" >> $GITHUB_OUTPUT
+          else
+            echo "⏭️  No son las 09:xx en Madrid (${HORA_MADRID}:xx). Saltando."
+            echo "should_run=false" >> $GITHUB_OUTPUT
+          fi
+
   vendors:
     name: Scraping vendors (solo export JSON)
     runs-on: ubuntu-latest
+    needs: gatekeeper
+    if: needs.gatekeeper.outputs.should_run == 'true'
     permissions:
       contents: read
-      actions: write
     strategy:
       fail-fast: false
       matrix:
@@ -69,22 +93,6 @@ jobs:
           echo "EMAIL_CONFIDENTIAL_FOOTER=${{ vars.EMAIL_CONFIDENTIAL_FOOTER }}" >> $GITHUB_ENV
           # Agrega aquí otros secrets relevantes si los usas
       - uses: actions/checkout@v6
-
-      - name: Verificar hora local en España
-        if: github.event_name == 'schedule'
-        run: |
-          HORA_MADRID=$(TZ="Europe/Madrid" date +%H)
-          MINUTO_MADRID=$(TZ="Europe/Madrid" date +%M)
-          echo "La hora en Madrid es: $HORA_MADRID:$MINUTO_MADRID"
-          if [ "$HORA_MADRID" != "09" ]; then
-            echo "No son las 9 AM en España. Cancelando esta ejecución..."
-            gh run cancel ${{ github.run_id }}
-            sleep 10
-          else
-            echo "Dentro de la franja 09:00-09:59, se permite la ejecución."
-          fi
-        env:
-          GH_TOKEN: ${{ github.token }}
 
       - uses: actions/setup-python@v6
         with:
