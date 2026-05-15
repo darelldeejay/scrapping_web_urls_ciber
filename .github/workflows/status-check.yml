@@ -236,16 +236,14 @@ jobs:
         id: validate
         run: |
           echo "🔍 Validando contenido del digest..."
-          python scripts/validate_digest.py --data .github/out/digest_data.json
-          
-          if [ $? -eq 0 ]; then
+          # Nota: usamos 'if python ...' para que bash -eo pipefail no mate el step
+          # cuando validate_digest.py sale con código 1 (datos inválidos).
+          if python scripts/validate_digest.py --data .github/out/digest_data.json; then
             echo "✅ Digest válido, proceder a enviar"
             echo "valid=true" >> $GITHUB_OUTPUT
           else
             echo "❌ Digest inválido, ABORTANDO envío"
             echo "valid=false" >> $GITHUB_OUTPUT
-            # NO usamos exit 1 aquí para permitir que el job continúe y reporte
-            # pero la siguiente etapa checará este flag
           fi
 
       - name: Compute flags (manual dispatch vs cron)
@@ -368,6 +366,7 @@ jobs:
           echo ""
           echo "Si es bloqueado incorrectamente en dry-run, revisa validate_digest.py"
           echo ""
+          exit 1  # Falla el job para que GitHub notifique que no se envió nada
 
       - name: Upload digest preview
         if: ${{ env.NOTIFY_DRY_RUN == 'true' }}
