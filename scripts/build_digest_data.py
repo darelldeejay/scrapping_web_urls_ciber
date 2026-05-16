@@ -22,6 +22,7 @@ import sys
 # Fix sys.path antes de cualquier import de common/
 sys.path.insert(0, os.path.abspath(os.path.join(os.path.dirname(__file__), '..')))
 
+import html as _html_lib
 import logging
 import re
 import json
@@ -65,6 +66,8 @@ STATUS_ANY_TODAY_RE = re.compile(
     re.I,
 )
 UNDER_MAINT_RE = re.compile(r"\bUnder Maintenance\b", re.I)
+# Exclude lines that describe future scheduled maintenance (e.g. Imperva "Scheduled update")
+SCHEDULED_MAINT_RE = re.compile(r"\bScheduled\s+(?:maintenance|update|mantenimiento)\b", re.I)
 
 def _collapse(s: str) -> str:
     return re.sub(r"\s+", " ", (s or "")).strip()
@@ -101,11 +104,11 @@ def _title_for_vendor(name: str) -> str:
     n = (name or "").strip()
     low = n.lower()
     if low.startswith("netskope"):
-        return "Netskope - Estado de Incidentes"
+        return "Netskope - Incident Status"
     if low.startswith("proofpoint"):
-        return "Proofpoint - Estado de Incidentes"
+        return "Proofpoint - Incident Status"
     if low.startswith("qualys"):
-        return "Qualys - Estado de Incidentes"
+        return "Qualys - Incident Status"
     if low.startswith("imperva"):
         return "Imperva - Status"
     if low.startswith("akamai") or "guardicore" in low:
@@ -186,7 +189,7 @@ def compute_counters(vendors: List[Dict[str, Any]]) -> Dict[str, int]:
         for ln in _safe_lines(v.get("incidents_lines")):
             if STATUS_RESOLVED_RE.search(ln):
                 resueltos += 1
-            elif STATUS_ANY_TODAY_RE.search(ln):
+            elif STATUS_ANY_TODAY_RE.search(ln) and not SCHEDULED_MAINT_RE.search(ln):
                 nuevos += 1
         for ln in _safe_lines(v.get("component_lines")):
             if UNDER_MAINT_RE.search(ln):
@@ -221,7 +224,10 @@ def build_recommendations(vendors: List[Dict[str, Any]], counts: Dict[str, int])
     if nuevos > 0:
         vendors_inc = [
             v.get("name", "?") for v in vendors
-            if any(STATUS_ANY_TODAY_RE.search(ln) for ln in _safe_lines(v.get("incidents_lines")))
+            if any(
+                STATUS_ANY_TODAY_RE.search(ln) and not SCHEDULED_MAINT_RE.search(ln)
+                for ln in _safe_lines(v.get("incidents_lines"))
+            )
             and not v.get("overall_ok")
         ]
         suffix = f" — {', '.join(vendors_inc)}" if vendors_inc else ""
@@ -247,12 +253,31 @@ def build_obs_clave(vendors: List[Dict[str, Any]], counts: Dict[str, int]) -> st
     if not any_not_ok and total_activity == 0:
         return "Sin novedades relevantes."
     if counts["INC_NUEVOS_HOY"] > 0:
-        return "Incidencias en curso en una o más plataformas. Revisión recomendada."
+        return "Actividad de incidencias registrada en una o más plataformas. Revisión recomendada."
     if counts["MANTENIMIENTOS_HOY"] > 0:
         return "Mantenimientos programados detectados en una o más plataformas."
     if counts["INC_RESUELTOS_HOY"] > 0:
         return "Incidentes resueltos hoy; verificar normalización de servicios."
     return "Actividad detectada; revisar detalle por fabricante."
+
+def build_vendor_html_block(v: Dict[str, Any]) -> str:
+    """
+    Versión HTML de build_vendor_block: igual en contenido pero los encabezados
+    === VENDOR === se envuelven en <strong> para destacar el nombre en negro.
+    Las líneas se unen con <br> para su uso dentro de un <div>.
+    """
+    text = build_vendor_block(v)
+    html_lines = []
+    for line in text.split("\n"):
+        stripped = line.strip()
+        if re.match(r"^===\s+.+\s+===$", stripped):
+            html_lines.append(
+                f'<strong style="color:#000000; font-weight:700; font-size:14px;">{_html_lib.escape(stripped)}</strong>'
+            )
+        else:
+            html_lines.append(_html_lib.escape(line))
+    return "<br>".join(html_lines)
+
 
 def next_report_date_utc_str() -> str:
     dt = datetime.now(timezone.utc) + timedelta(days=1)
@@ -285,11 +310,14 @@ def main():
         }
         vendors.append(v)
 
-    # 2) Detalles por fabricante (texto)
+    # 2) Detalles por fabricante (texto y HTML)
     vendor_blocks = []
+    vendor_html_blocks = []
     for v in sorted(vendors, key=lambda x: (x.get("name") or "").lower()):
         vendor_blocks.append(build_vendor_block(v))
+        vendor_html_blocks.append(build_vendor_html_block(v))
     detalles_por_vendor_texto = "\n\n".join(vendor_blocks).strip()
+    detalles_por_vendor_html = "<br><br>".join(vendor_html_blocks)
 
     # 3) Contadores + observación + recomendaciones
     counts = compute_counters(vendors)
@@ -311,6 +339,7 @@ def main():
         "VENTANA_UTC": ventana_utc,
         # Detalles
         "DETALLES_POR_VENDOR_TEXTO": detalles_por_vendor_texto,
+        "DETALLES_POR_VENDOR_HTML": detalles_por_vendor_html,
         # Contadores (aprox.)
         "INC_NUEVOS_HOY": counts["INC_NUEVOS_HOY"],
         "INC_ACTIVOS": counts["INC_ACTIVOS"],

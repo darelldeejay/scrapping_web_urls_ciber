@@ -378,9 +378,9 @@ def format_incidente_line(it: dict, idx: Optional[int] = None, resolved_section:
         main += f" ({url})"
 
     if resolved_section:
-        date_line = f"   Inicio: {dt_fmt(started)} · Fin: {dt_fmt(ended)}"
+        date_line = f"   Start: {dt_fmt(started)} · End: {dt_fmt(ended)}"
     else:
-        date_line = f"   Inicio: {dt_fmt(started)} · Últ. act.: {dt_fmt(ended)}"
+        date_line = f"   Start: {dt_fmt(started)} · Last update: {dt_fmt(ended)}"
 
     return [main, date_line]
 
@@ -391,18 +391,18 @@ def format_message(activos: List[dict], pasados_15: List[dict]) -> str:
         ""
     ]
     # Activos
-    lines.append("Incidentes activos")
+    lines.append("Active incidents")
     if not activos:
-        lines.append("- No hay incidentes activos reportados.")
+        lines.append("- No active incidents reported.")
     else:
         for i, it in enumerate(activos, 1):
             lines.extend(format_incidente_line(it, idx=i, resolved_section=False))
 
     # Pasados (15 días resueltos)
     lines.append("")
-    lines.append("Últimos 15 días (resueltos)")
+    lines.append("Past incidents (last 15 days)")
     if not pasados_15:
-        lines.append("- No hay incidentes en los últimos 15 días.")
+        lines.append("- No incidents in the last 15 days.")
     else:
         for i, it in enumerate(pasados_15, 1):
             lines.extend(format_incidente_line(it, idx=i, resolved_section=True))
@@ -430,16 +430,16 @@ def collect(driver):
 
     # incidents_lines estructurado
     incidents_lines: List[str] = []
-    incidents_lines.append("Incidentes activos")
+    incidents_lines.append("Active incidents")
     if not activos:
-        incidents_lines.append("- No hay incidentes activos reportados.")
+        incidents_lines.append("- No active incidents reported.")
     else:
         for i, it in enumerate(activos, 1):
             incidents_lines.extend(format_incidente_line(it, idx=i, resolved_section=False))
     incidents_lines.append("")
-    incidents_lines.append("Últimos 15 días (resueltos)")
+    incidents_lines.append("Past incidents (last 15 days)")
     if not pasados_15:
-        incidents_lines.append("- No hay incidentes en los últimos 15 días.")
+        incidents_lines.append("- No incidents in the last 15 days.")
     else:
         for i, it in enumerate(pasados_15, 1):
             incidents_lines.extend(format_incidente_line(it, idx=i, resolved_section=True))

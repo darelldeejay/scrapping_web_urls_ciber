@@ -477,8 +477,12 @@ def collect(driver):
         else:
             for t in items:
                 t = str(t).lstrip("• ").strip()
-                incidents_lines.append(t if t.startswith("- ") else f"- {t}")
-            if incidents_lines == ["- No incidents reported today."]:
+                line = t if t.startswith("- ") else f"- {t}"
+                # Filter out bare parse artifacts with no meaningful content
+                if line.strip() in ("- Incident", "Incident"):
+                    continue
+                incidents_lines.append(line)
+            if not incidents_lines or incidents_lines == ["- No incidents reported today."]:
                 incidents_lines = ["No incidents reported today."]
 
         overall_ok = (component_lines == ["All components Operational"] and

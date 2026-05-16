@@ -71,8 +71,14 @@ def inject_defaults(data: Dict[str, str]) -> Dict[str, str]:
         "ACCION_SUGERIDA": data.get("ACCION_SUGERIDA", ""),
         "FECHA_SIGUIENTE_REPORTE": data.get("FECHA_SIGUIENTE_REPORTE", ""),
         "DETALLES_POR_VENDOR_TEXTO": data.get("DETALLES_POR_VENDOR_TEXTO", ""),
+        "DETALLES_POR_VENDOR_HTML": data.get("DETALLES_POR_VENDOR_HTML", ""),
         "SALUDO_LINEA": data.get("SALUDO_LINEA") or _saludo_linea(now_utc),
     }
+    # Confidencial line: only render if the variable has a value
+    conf_footer = data.get("EMAIL_CONFIDENTIAL_FOOTER", "").strip()
+    defaults["CONFIDENCIAL_LINEA_HTML"] = (
+        f"<strong>Confidencial:</strong> {conf_footer}<br>" if conf_footer else ""
+    )
     return {**defaults, **data}
 
 # ---------------- Senders (honran DRY-RUN) ----------------

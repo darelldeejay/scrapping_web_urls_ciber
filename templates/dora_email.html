@@ -104,6 +104,7 @@
             background: #fafbfc; 
             padding: 25px; 
             margin: 0;
+            display: block;
             font-family: 'SF Mono', Consolas, 'Courier New', monospace; 
             font-size: 13px; 
             line-height: 1.8;
@@ -208,7 +209,7 @@
             </div>
             <div class="kpi-card">
                 <div class="kpi-number">{{INC_RESUELTOS_HOY}}</div>
-                <div class="kpi-label">Resueltos Hoy</div>
+                <div class="kpi-label">Resueltos</div>
             </div>
             <div class="kpi-card">
                 <div class="kpi-number">{{MANTENIMIENTOS_HOY}}</div>
@@ -241,7 +242,7 @@
                 <div class="vendor-header">
                     ESTADO OPERACIONAL POR FABRICANTE
                 </div>
-                <pre class="vendor-content">{{DETALLES_POR_VENDOR_TEXTO}}</pre>
+                <div class="vendor-content">{{DETALLES_POR_VENDOR_HTML}}</div>
             </div>
             
             <p style="font-size: 12px; color: #6c757d; margin-top: 15px;">
@@ -288,7 +289,7 @@
                 </div>
                 <div class="footer-compliance">
                     <strong>Cumplimiento DORA:</strong> Este reporte cumple con el Article 28 sobre monitoreo de terceros<br>
-                    <strong>Confidencial:</strong> {{EMAIL_CONFIDENTIAL_FOOTER}}<br>
+                    {{CONFIDENCIAL_LINEA_HTML}}
                     {{FIRMA_HTML}}
                 </div>
             </div>

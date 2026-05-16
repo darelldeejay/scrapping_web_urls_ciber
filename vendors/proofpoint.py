@@ -161,12 +161,12 @@ def format_message(activos: List[Dict[str, Any]], banner_text: Optional[str]) ->
     ]
     # Si hay banner explícito de "No current identified incidents", muéstralo como línea simple
     if banner_text and not activos:
-        lines.append("Incidentes activos")
-        lines.append("- No hay incidentes activos reportados.")
+        lines.append("Active incidents")
+        lines.append("- No active incidents reported.")
     else:
-        lines.append("Incidentes activos")
+        lines.append("Active incidents")
         if not activos:
-            lines.append("- No hay incidentes activos reportados.")
+            lines.append("- No active incidents reported.")
         else:
             for i, it in enumerate(activos, 1):
                 lines.extend(format_incident_line(it, i))
@@ -205,9 +205,9 @@ def collect(driver) -> Dict[str, Any]:
     component_lines: List[str] = []
 
     # incidents_lines
-    incidents_lines: List[str] = ["Incidentes activos"]
+    incidents_lines: List[str] = ["Active incidents"]
     if not activos:
-        incidents_lines.append("- No hay incidentes activos reportados.")
+        incidents_lines.append("- No active incidents reported.")
     else:
         for i, it in enumerate(activos, 1):
             incidents_lines.extend(format_incident_line(it, i))
