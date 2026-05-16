@@ -69,11 +69,21 @@ jobs:
           HORA_MADRID=$(TZ="Europe/Madrid" date +%H)
           MINUTO_MADRID=$(TZ="Europe/Madrid" date +%M)
           echo "Hora en Madrid: ${HORA_MADRID}:${MINUTO_MADRID}"
-          if [ "$HORA_MADRID" = "08" ]; then
-            echo "✅ Son las 08:xx en Madrid. Procediendo."
+
+          # Ventana de aceptación:
+          #   08:xx → nominal (cron sin retraso)
+          #   09:00-09:29 → tolerancia para retrasos de GitHub Actions (hasta ~59 min)
+          # Se excluye 09:30+ para no procesar el segundo cron de verano
+          # (30 7 UTC → 09:30 CEST) que no debe ejecutarse en verano.
+          OK=false
+          [ "$HORA_MADRID" = "08" ] && OK=true
+          [ "$HORA_MADRID" = "09" ] && [ "$MINUTO_MADRID" -lt 30 ] && OK=true
+
+          if [ "$OK" = "true" ]; then
+            echo "✅ Son las ${HORA_MADRID}:${MINUTO_MADRID} en Madrid. Dentro de ventana 08:00-09:29. Procediendo."
             echo "should_run=true" >> $GITHUB_OUTPUT
           else
-            echo "⏭️  No son las 08:xx en Madrid (${HORA_MADRID}:${MINUTO_MADRID}). Saltando."
+            echo "⏭️  Hora ${HORA_MADRID}:${MINUTO_MADRID} fuera de ventana (08:00-09:29). Saltando."
             echo "should_run=false" >> $GITHUB_OUTPUT
           fi
 
@@ -152,8 +162,11 @@ jobs:
     timeout-minutes: 10
     permissions:
       contents: read
-    needs: vendors
-    if: always()
+    needs: [gatekeeper, vendors]
+    # always() permite que el digest corra aunque algún vendor falle.
+    # La condición sobre gatekeeper evita que corra cuando el horario
+    # fue descartado (vendors skipped → sin datos → reporte vacío).
+    if: ${{ always() && needs.gatekeeper.outputs.should_run == 'true' }}
     steps:
       - uses: actions/checkout@v6
 
