@@ -1,4 +1,4 @@
-# Scrapping WEB · Monitor diario de terceros ICT (DORA)
+# Scraping WEB · Monitor diario de terceros ICT (DORA)
 
 Este proyecto realiza **scraping** de páginas de estado de fabricantes ICT, normaliza los resultados y envía un **informe diario** (texto a **Telegram** y HTML a **Microsoft Teams**) alineado con prácticas de **resiliencia operativa (DORA)**.
 
