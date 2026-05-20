@@ -38,7 +38,11 @@ on:
     - cron: "30 6 * * *"   # verano
 
 concurrency:
-  group: dora-status-${{ github.ref }}
+  # Los crons agendados reciben su propio run_id como grupo → nunca se cancelan
+  # entre sí (el cron de invierno no mata al de verano ni viceversa).
+  # Los disparos manuales comparten el grupo 'manual' → un nuevo manual sí
+  # puede cancelar uno anterior si se superponen.
+  group: dora-status-${{ github.ref }}-${{ github.event_name == 'schedule' && github.run_id || 'manual' }}
   cancel-in-progress: true
 
 env:
