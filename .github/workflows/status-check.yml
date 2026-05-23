@@ -57,7 +57,7 @@ env:
 
 jobs:
   gatekeeper:
-    name: "Verificar horario (Madrid 08:30)"
+    name: "Verificar horario (Madrid 08:xx-09:xx)"
     runs-on: ubuntu-latest
     outputs:
       should_run: ${{ steps.check.outputs.should_run }}
@@ -76,18 +76,19 @@ jobs:
 
           # Ventana de aceptación:
           #   08:xx → nominal (cron sin retraso)
-          #   09:00-09:29 → tolerancia para retrasos de GitHub Actions (hasta ~59 min)
-          # Se excluye 09:30+ para no procesar el segundo cron de verano
-          # (30 7 UTC → 09:30 CEST) que no debe ejecutarse en verano.
+          #   09:xx → tolerancia para retrasos de GitHub Actions (hasta ~89 min)
+          # Nota: en verano el cron de invierno (30 7 UTC → 09:30 CEST) también
+          # pasará esta ventana, lo que puede producir un segundo envío ese día.
+          # Esto es preferible a no recibir ningún reporte por retraso excesivo.
           OK=false
           [ "$HORA_MADRID" = "08" ] && OK=true
-          [ "$HORA_MADRID" = "09" ] && [ "$MINUTO_MADRID" -lt 30 ] && OK=true
+          [ "$HORA_MADRID" = "09" ] && OK=true
 
           if [ "$OK" = "true" ]; then
-            echo "✅ Son las ${HORA_MADRID}:${MINUTO_MADRID} en Madrid. Dentro de ventana 08:00-09:29. Procediendo."
+            echo "✅ Son las ${HORA_MADRID}:${MINUTO_MADRID} en Madrid. Dentro de ventana 08:00-09:59. Procediendo."
             echo "should_run=true" >> $GITHUB_OUTPUT
           else
-            echo "⏭️  Hora ${HORA_MADRID}:${MINUTO_MADRID} fuera de ventana (08:00-09:29). Saltando."
+            echo "⏭️  Hora ${HORA_MADRID}:${MINUTO_MADRID} fuera de ventana (08:00-09:59). Saltando."
             echo "should_run=false" >> $GITHUB_OUTPUT
           fi
 
