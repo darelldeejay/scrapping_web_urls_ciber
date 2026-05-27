@@ -70,25 +70,40 @@ jobs:
             echo "should_run=true" >> $GITHUB_OUTPUT
             exit 0
           fi
+
+          TZ_MADRID=$(TZ="Europe/Madrid" date +%Z)
+          CRON_TRIGGERED="${{ github.event.schedule }}"
+          echo "Zona horaria actual en Madrid: $TZ_MADRID"
+          echo "Cron que disparó el workflow: $CRON_TRIGGERED"
+
+          # 1. En verano (CEST): Solo permitimos el cron programado a las 06:30 UTC (08:30 local)
+          if [ "$TZ_MADRID" = "CEST" ] && [ "$CRON_TRIGGERED" != "30 6 * * *" ]; then
+            echo "⏭️  Estamos en horario de verano (CEST). Se descarta el cron de invierno ($CRON_TRIGGERED) para evitar doble envío tardío."
+            echo "should_run=false" >> $GITHUB_OUTPUT
+            exit 0
+          fi
+
+          # 2. En invierno (CET): Solo permitimos el cron programado a las 07:30 UTC (08:30 local)
+          if [ "$TZ_MADRID" = "CET" ] && [ "$CRON_TRIGGERED" != "30 7 * * *" ]; then
+            echo "⏭️  Estamos en horario de invierno (CET). Se descarta el cron de verano ($CRON_TRIGGERED)."
+            echo "should_run=false" >> $GITHUB_OUTPUT
+            exit 0
+          fi
+
+          # 3. Ventana de hora de respaldo en Madrid (08:xx - 09:xx) para tolerar colas en GitHub Actions
           HORA_MADRID=$(TZ="Europe/Madrid" date +%H)
           MINUTO_MADRID=$(TZ="Europe/Madrid" date +%M)
-          echo "Hora en Madrid: ${HORA_MADRID}:${MINUTO_MADRID}"
+          echo "Hora en Madrid al iniciar: ${HORA_MADRID}:${MINUTO_MADRID}"
 
-          # Ventana de aceptación:
-          #   08:xx → nominal (cron sin retraso)
-          #   09:xx → tolerancia para retrasos de GitHub Actions (hasta ~89 min)
-          # Nota: en verano el cron de invierno (30 7 UTC → 09:30 CEST) también
-          # pasará esta ventana, lo que puede producir un segundo envío ese día.
-          # Esto es preferible a no recibir ningún reporte por retraso excesivo.
           OK=false
           [ "$HORA_MADRID" = "08" ] && OK=true
           [ "$HORA_MADRID" = "09" ] && OK=true
 
           if [ "$OK" = "true" ]; then
-            echo "✅ Son las ${HORA_MADRID}:${MINUTO_MADRID} en Madrid. Dentro de ventana 08:00-09:59. Procediendo."
+            echo "✅ Hora dentro de la ventana de tolerancia (08:00-09:59). Procediendo."
             echo "should_run=true" >> $GITHUB_OUTPUT
           else
-            echo "⏭️  Hora ${HORA_MADRID}:${MINUTO_MADRID} fuera de ventana (08:00-09:59). Saltando."
+            echo "⏭️  Hora ${HORA_MADRID}:${MINUTO_MADRID} fuera de ventana. Saltando."
             echo "should_run=false" >> $GITHUB_OUTPUT
           fi
 
