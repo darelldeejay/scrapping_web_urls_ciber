@@ -54,7 +54,7 @@ def modify_definition(d: dict) -> dict:
         "type": "OpenApiConnection",
         "inputs": {
             "parameters": {
-                "emailMessage/To":         "@{variables('Body')?['to']}",
+                "emailMessage/To":         "DESTINATARIO@EJEMPLO.COM",
                 "emailMessage/Subject":    "@{variables('Body')?['subject']}",
                 "emailMessage/Body":       "@{variables('Body')?['html']}",
                 "emailMessage/Importance": "Normal",

@@ -350,7 +350,6 @@ jobs:
           TELEGRAM_BOT_TOKEN: ${{ secrets.TELEGRAM_BOT_TOKEN }}
           TELEGRAM_USER_ID: ${{ secrets.TELEGRAM_USER_ID }}
           TEAMS_WEBHOOK_URL: ${{ secrets.TEAMS_WEBHOOK_URL }}
-          EMAIL_TO: ${{ secrets.EMAIL_TO }}
           NOTIFY_DRY_RUN: ${{ env.NOTIFY_DRY_RUN }}
         run: |
           echo "🚀 Iniciando envío de digest..."

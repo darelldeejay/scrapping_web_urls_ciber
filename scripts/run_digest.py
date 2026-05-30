@@ -183,7 +183,7 @@ def _simplify_html_for_teams(html: str) -> str:
 
     return body.decode_contents()
 
-def send_teams(html: str, subject: str, email_to: str, dry_run: bool) -> None:
+def send_teams(html: str, subject: str, dry_run: bool) -> None:
     """Envía el digest via Power Automate webhook.
     El flujo de Power Automate envía el HTML por email al cliente (Office 365 Outlook)
     y publica una confirmación en el canal Teams del SOC.
@@ -192,7 +192,6 @@ def send_teams(html: str, subject: str, email_to: str, dry_run: bool) -> None:
         return
     webhook = env_or_raise("TEAMS_WEBHOOK_URL")
     payload = {
-        "to":      email_to,
         "subject": subject,
         "html":    html,
     }
@@ -279,8 +278,7 @@ def main():
     # Teams → Power Automate envía el HTML por email al cliente y notifica al SOC en Teams
     if "teams" in selected:
         try:
-            email_to = env_or_raise("EMAIL_TO")
-            send_teams(html_body, subject=subject, email_to=email_to, dry_run=False)
+            send_teams(html_body, subject=subject, dry_run=False)
         except Exception as e:
             errors.append(f"Teams: {e}")
 
