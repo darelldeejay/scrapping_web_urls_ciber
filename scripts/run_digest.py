@@ -158,31 +158,30 @@ def _build_teams_markdown(data: Dict[str, str], subject: str) -> str:
     return "\n".join(lines)
 
 def _simplify_html_for_teams(html: str) -> str:
-    """Convierte CSS de clases a estilos inline para que Teams renderice el diseño completo.
-    Teams no soporta bloques <style> con clases CSS, pero sí atributos style="" inline.
-    Usa premailer para hacer el inlining automáticamente, igual que hacen los clientes de email.
+    """Produce HTML limpio y simple para Teams.
+    Teams renderiza: <h1-6>, <p>, <b>, <strong>, <i>, <em>, <u>, <br>,
+    <table>, <tr>, <th>, <td>, <ul>, <ol>, <li>, <a href>, <img src>.
+    Teams ELIMINA TODOS los estilos CSS (bloques <style> y atributos style="").
+    Por tanto enviamos solo estructura semántica sin ningún CSS.
     """
-    try:
-        import premailer
-        inlined = premailer.transform(
-            html,
-            remove_classes=False,
-            strip_important=False,
-            allow_insecure_ssl=False,
-        )
-        # Extraer solo el <body> — Teams no acepta <!doctype> ni <head>
-        from bs4 import BeautifulSoup
-        soup = BeautifulSoup(inlined, "lxml")
-        body = soup.find("body")
-        return body.decode_contents() if body else inlined
-    except Exception as e:
-        logger.warning("premailer falló (%s), enviando body sin CSS", e)
-        from bs4 import BeautifulSoup
-        soup = BeautifulSoup(html, "lxml")
-        for tag in soup.find_all(["style", "script", "head"]):
-            tag.decompose()
-        body = soup.find("body")
-        return body.decode_contents() if body else html
+    from bs4 import BeautifulSoup
+
+    soup = BeautifulSoup(html, "lxml")
+
+    # Eliminar etiquetas que Teams no necesita o no soporta
+    for tag in soup.find_all(["style", "script", "head", "meta", "link"]):
+        tag.decompose()
+
+    body = soup.find("body") or soup
+
+    # Eliminar atributos CSS (style y class) de todos los elementos
+    for tag in body.find_all(True):
+        tag.attrs = {
+            k: v for k, v in (tag.attrs or {}).items()
+            if k in ("href", "src", "alt", "colspan", "rowspan", "border", "cellpadding", "cellspacing")
+        }
+
+    return body.decode_contents()
 
 def send_teams(html: str, subject: Optional[str], dry_run: bool) -> None:
     """Envía el digest HTML a Teams via Power Automate webhook."""
