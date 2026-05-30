@@ -220,10 +220,10 @@ def main():
         except Exception as e:
             errors.append(f"Telegram: {e}")
 
-    # Teams → SOLO bloque HTML (como acordado)
+    # Teams → versión texto plana (Adaptive Card TextBlock no renderiza HTML)
     if "teams" in selected:
         try:
-            payload = f"**{subject}**\n\n{html_block}"
+            payload = f"**{subject}**\n\n{text_body}"
             send_teams(payload, subject=subject, dry_run=False)
         except Exception as e:
             errors.append(f"Teams: {e}")
