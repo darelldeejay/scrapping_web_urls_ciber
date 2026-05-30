@@ -103,6 +103,60 @@ def send_telegram(markdown: str, subject: Optional[str], dry_run: bool) -> None:
                 msg = msg[:600] + "...(truncado)"
             raise RuntimeError(f"Telegram error ({r.status_code}): {msg}")
 
+def _build_teams_markdown(data: Dict[str, str], subject: str) -> str:
+    """Construye un mensaje Markdown bien formateado para Teams.
+    Teams renderiza Markdown nativo: negrita, encabezados, listas, separadores.
+    """
+    lines = [f"## {subject}", ""]
+
+    # KPIs
+    kpis = [
+        ("🏢 Proveedores ICT", data.get("NUM_PROVEEDORES", "-")),
+        ("🆕 Nuevos Hoy", data.get("INC_NUEVOS_HOY", "-")),
+        ("🔴 Activos", data.get("INC_ACTIVOS", "-")),
+        ("✅ Resueltos", data.get("INC_RESUELTOS", "-")),
+        ("🔧 Mantenimientos", data.get("MANTENIMIENTOS_HOY", "-")),
+    ]
+    lines.append("| Métrica | Valor |")
+    lines.append("|---|---|")
+    for label, val in kpis:
+        lines.append(f"| {label} | **{val}** |")
+    lines.append("")
+
+    # Observación clave
+    obs = data.get("OBS_CLAVE", "").strip()
+    if obs:
+        lines.append(f"**Observación:** {obs}")
+        lines.append("")
+
+    # Detalle por vendor
+    detalles = data.get("DETALLES_POR_VENDOR_TEXTO", "").strip()
+    if detalles:
+        lines.append("---")
+        lines.append("### Detalle por fabricante")
+        lines.append("")
+        lines.append(detalles)
+        lines.append("")
+
+    # Recomendaciones
+    recs = data.get("RECOMENDACIONES", "").strip()
+    if recs:
+        lines.append("---")
+        lines.append("### Recomendaciones")
+        lines.append("")
+        lines.append(recs)
+        lines.append("")
+
+    # Pie
+    fecha = data.get("FECHA_UTC", "")
+    hora = data.get("HORA_MUESTREO_UTC", "")
+    cliente = data.get("CLIENT_NAME", "")
+    if cliente:
+        lines.append(f"---")
+        lines.append(f"*{cliente} · {fecha} {hora} UTC*")
+
+    return "\n".join(lines)
+
 def _simplify_html_for_teams(html: str) -> str:
     """Convierte CSS de clases a estilos inline para que Teams renderice el diseño completo.
     Teams no soporta bloques <style> con clases CSS, pero sí atributos style="" inline.
@@ -131,16 +185,11 @@ def _simplify_html_for_teams(html: str) -> str:
         return str(body) if body else html
 
 def send_teams(html: str, subject: Optional[str], dry_run: bool) -> None:
-    """Envía el digest a Teams via Power Automate webhook.
-    Los conectores Office 365 (MessageCard) fueron retirados por Microsoft el 31/12/2025.
-    Nuevo flujo: Teams channel → Flujos de trabajo → "Post to a channel when a webhook request is received".
-    El flow de Power Automate recibe {"text": "<body>...</body>"} y lo publica como mensaje HTML en el canal.
-    """
+    """Envía el digest HTML a Teams via Power Automate webhook."""
     if dry_run:
         return
     webhook = env_or_raise("TEAMS_WEBHOOK_URL")
-    teams_html = _simplify_html_for_teams(html)
-    r = requests.post(webhook, json={"text": teams_html}, timeout=30)
+    r = requests.post(webhook, json={"text": html}, timeout=30)
     if r.status_code >= 300:
         msg = r.text
         if len(msg) > 600:
@@ -220,10 +269,11 @@ def main():
         except Exception as e:
             errors.append(f"Telegram: {e}")
 
-    # Teams → HTML completo del email (Power Automate lo publica en el canal)
+    # Teams → HTML completo del email con CSS inline (Power Automate lo publica en el canal)
     if "teams" in selected:
         try:
-            send_teams(html_body, subject=subject, dry_run=False)
+            teams_html = _simplify_html_for_teams(html_body)
+            send_teams(teams_html, subject=subject, dry_run=False)
         except Exception as e:
             errors.append(f"Teams: {e}")
 
