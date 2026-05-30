@@ -59,7 +59,7 @@ def modify_definition(d: dict) -> dict:
                 "location":                 "Channel",
                 "body/recipient/groupId":   GROUP_ID,
                 "body/recipient/channelId": CHANNEL_ID,
-                "body/messageBody":         "@{variables('Body')?['html']}",
+                "body/messageBody":         "@{variables('Body')?['teams_html']}",
             },
             "host": {
                 "apiId":          "/providers/Microsoft.PowerApps/apis/shared_teams",
@@ -77,6 +77,8 @@ def modify_definition(d: dict) -> dict:
         "inputs": {
             "parameters": {
                 "emailMessage/To":         "DESTINATARIO@EJEMPLO.COM",
+                "emailMessage/Cc":         "CC@EJEMPLO.COM",
+                "emailMessage/Bcc":        "BCC@EJEMPLO.COM",
                 "emailMessage/Subject":    "@{variables('Body')?['subject']}",
                 "emailMessage/Body":       "@{variables('Body')?['html']}",
                 "emailMessage/Importance": "Normal",
