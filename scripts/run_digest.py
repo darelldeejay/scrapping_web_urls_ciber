@@ -104,12 +104,42 @@ def send_telegram(markdown: str, subject: Optional[str], dry_run: bool) -> None:
             raise RuntimeError(f"Telegram error ({r.status_code}): {msg}")
 
 def send_teams(markdown: str, subject: Optional[str], dry_run: bool) -> None:
+    """Envía el digest a Teams via Power Automate webhook (Adaptive Card).
+    Los conectores Office 365 (MessageCard) fueron retirados por Microsoft el 31/12/2025.
+    Nuevo flujo: Teams channel → Workflows → "Post to a channel when a webhook request is received".
+    """
     if dry_run:
         return
     webhook = env_or_raise("TEAMS_WEBHOOK_URL")
     title = subject or "DORA Daily Digest"
-    card = {"@type": "MessageCard","@context": "https://schema.org/extensions",
-            "summary": title,"themeColor": "2B579A","title": title,"text": markdown}
+    # Formato Adaptive Card para Power Automate webhook
+    card = {
+        "type": "message",
+        "attachments": [
+            {
+                "contentType": "application/vnd.microsoft.card.adaptive",
+                "content": {
+                    "$schema": "http://adaptivecards.io/schemas/adaptive-card.json",
+                    "type": "AdaptiveCard",
+                    "version": "1.4",
+                    "body": [
+                        {
+                            "type": "TextBlock",
+                            "text": title,
+                            "weight": "Bolder",
+                            "size": "Medium",
+                            "wrap": True,
+                        },
+                        {
+                            "type": "TextBlock",
+                            "text": markdown,
+                            "wrap": True,
+                        },
+                    ],
+                },
+            }
+        ],
+    }
     r = requests.post(webhook, json=card, timeout=30)
     if r.status_code >= 300:
         msg = r.text
