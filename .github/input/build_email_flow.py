@@ -49,8 +49,30 @@ def modify_definition(d: dict) -> dict:
         actions.pop(k, None)
 
     # Acción: enviar email via Office 365 Outlook
-    actions["Enviar_correo_electronico"] = {
+    # Paso 1: publicar el informe en Teams (backup)
+    actions["Publicar_informe_en_Teams"] = {
         "runAfter": {"Initialize_variable_(Body)": ["Succeeded"]},
+        "type": "OpenApiConnection",
+        "inputs": {
+            "parameters": {
+                "poster":                   "Flow bot",
+                "location":                 "Channel",
+                "body/recipient/groupId":   GROUP_ID,
+                "body/recipient/channelId": CHANNEL_ID,
+                "body/messageBody":         "@{variables('Body')?['html']}",
+            },
+            "host": {
+                "apiId":          "/providers/Microsoft.PowerApps/apis/shared_teams",
+                "connectionName": "shared_teams",
+                "operationId":    "PostMessageToConversation",
+            },
+            "authentication": "@parameters('$authentication')",
+        },
+    }
+
+    # Paso 2: enviar email via Office 365 Outlook
+    actions["Enviar_correo_electronico"] = {
+        "runAfter": {"Publicar_informe_en_Teams": ["Succeeded"]},
         "type": "OpenApiConnection",
         "inputs": {
             "parameters": {
@@ -68,7 +90,7 @@ def modify_definition(d: dict) -> dict:
         },
     }
 
-    # Acción: notificación de confirmación al SOC en Teams
+    # Paso 3: confirmación al SOC en Teams
     actions["Notificar_SOC_Teams"] = {
         "runAfter": {"Enviar_correo_electronico": ["Succeeded"]},
         "type": "OpenApiConnection",
