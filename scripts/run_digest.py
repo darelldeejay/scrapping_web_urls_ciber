@@ -104,18 +104,31 @@ def send_telegram(markdown: str, subject: Optional[str], dry_run: bool) -> None:
             raise RuntimeError(f"Telegram error ({r.status_code}): {msg}")
 
 def _simplify_html_for_teams(html: str) -> str:
-    """Extrae el <body> del HTML y elimina <style>/<script> para Teams.
-    Teams no soporta documentos HTML completos ni CSS — solo HTML inline básico.
+    """Convierte CSS de clases a estilos inline para que Teams renderice el diseño completo.
+    Teams no soporta bloques <style> con clases CSS, pero sí atributos style="" inline.
+    Usa premailer para hacer el inlining automáticamente, igual que hacen los clientes de email.
     """
     try:
+        import premailer
+        inlined = premailer.transform(
+            html,
+            remove_classes=False,
+            strip_important=False,
+            allow_insecure_ssl=False,
+        )
+        # Extraer solo el <body> — Teams no acepta <!doctype> ni <head>
+        from bs4 import BeautifulSoup
+        soup = BeautifulSoup(inlined, "lxml")
+        body = soup.find("body")
+        return str(body) if body else inlined
+    except Exception as e:
+        logger.warning("premailer falló (%s), enviando body sin CSS", e)
         from bs4 import BeautifulSoup
         soup = BeautifulSoup(html, "lxml")
         for tag in soup.find_all(["style", "script", "head"]):
             tag.decompose()
         body = soup.find("body")
         return str(body) if body else html
-    except Exception:
-        return html
 
 def send_teams(html: str, subject: Optional[str], dry_run: bool) -> None:
     """Envía el digest a Teams via Power Automate webhook.
