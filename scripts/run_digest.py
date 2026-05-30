@@ -174,7 +174,7 @@ def _simplify_html_for_teams(html: str) -> str:
         from bs4 import BeautifulSoup
         soup = BeautifulSoup(inlined, "lxml")
         body = soup.find("body")
-        return str(body) if body else inlined
+        return body.decode_contents() if body else inlined
     except Exception as e:
         logger.warning("premailer falló (%s), enviando body sin CSS", e)
         from bs4 import BeautifulSoup
@@ -182,7 +182,7 @@ def _simplify_html_for_teams(html: str) -> str:
         for tag in soup.find_all(["style", "script", "head"]):
             tag.decompose()
         body = soup.find("body")
-        return str(body) if body else html
+        return body.decode_contents() if body else html
 
 def send_teams(html: str, subject: Optional[str], dry_run: bool) -> None:
     """Envía el digest HTML a Teams via Power Automate webhook."""
