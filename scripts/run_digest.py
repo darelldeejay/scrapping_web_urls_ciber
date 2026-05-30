@@ -183,12 +183,20 @@ def _simplify_html_for_teams(html: str) -> str:
 
     return body.decode_contents()
 
-def send_teams(html: str, subject: Optional[str], dry_run: bool) -> None:
-    """Envía el digest HTML a Teams via Power Automate webhook."""
+def send_teams(html: str, subject: str, email_to: str, dry_run: bool) -> None:
+    """Envía el digest via Power Automate webhook.
+    El flujo de Power Automate envía el HTML por email al cliente (Office 365 Outlook)
+    y publica una confirmación en el canal Teams del SOC.
+    """
     if dry_run:
         return
     webhook = env_or_raise("TEAMS_WEBHOOK_URL")
-    r = requests.post(webhook, json={"text": html}, timeout=30)
+    payload = {
+        "to":      email_to,
+        "subject": subject,
+        "html":    html,
+    }
+    r = requests.post(webhook, json=payload, timeout=60)
     if r.status_code >= 300:
         msg = r.text
         if len(msg) > 600:
@@ -268,11 +276,11 @@ def main():
         except Exception as e:
             errors.append(f"Telegram: {e}")
 
-    # Teams → HTML completo del email con CSS inline (Power Automate lo publica en el canal)
+    # Teams → Power Automate envía el HTML por email al cliente y notifica al SOC en Teams
     if "teams" in selected:
         try:
-            teams_html = _simplify_html_for_teams(html_body)
-            send_teams(teams_html, subject=subject, dry_run=False)
+            email_to = env_or_raise("EMAIL_TO")
+            send_teams(html_body, subject=subject, email_to=email_to, dry_run=False)
         except Exception as e:
             errors.append(f"Teams: {e}")
 
