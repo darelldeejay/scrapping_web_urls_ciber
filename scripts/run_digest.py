@@ -103,16 +103,31 @@ def send_telegram(markdown: str, subject: Optional[str], dry_run: bool) -> None:
                 msg = msg[:600] + "...(truncado)"
             raise RuntimeError(f"Telegram error ({r.status_code}): {msg}")
 
+def _simplify_html_for_teams(html: str) -> str:
+    """Extrae el <body> del HTML y elimina <style>/<script> para Teams.
+    Teams no soporta documentos HTML completos ni CSS — solo HTML inline básico.
+    """
+    try:
+        from bs4 import BeautifulSoup
+        soup = BeautifulSoup(html, "lxml")
+        for tag in soup.find_all(["style", "script", "head"]):
+            tag.decompose()
+        body = soup.find("body")
+        return str(body) if body else html
+    except Exception:
+        return html
+
 def send_teams(html: str, subject: Optional[str], dry_run: bool) -> None:
     """Envía el digest a Teams via Power Automate webhook.
     Los conectores Office 365 (MessageCard) fueron retirados por Microsoft el 31/12/2025.
     Nuevo flujo: Teams channel → Flujos de trabajo → "Post to a channel when a webhook request is received".
-    El flow de Power Automate recibe {"text": "<html>"} y lo publica como mensaje HTML en el canal.
+    El flow de Power Automate recibe {"text": "<body>...</body>"} y lo publica como mensaje HTML en el canal.
     """
     if dry_run:
         return
     webhook = env_or_raise("TEAMS_WEBHOOK_URL")
-    r = requests.post(webhook, json={"text": html}, timeout=30)
+    teams_html = _simplify_html_for_teams(html)
+    r = requests.post(webhook, json={"text": teams_html}, timeout=30)
     if r.status_code >= 300:
         msg = r.text
         if len(msg) > 600:
