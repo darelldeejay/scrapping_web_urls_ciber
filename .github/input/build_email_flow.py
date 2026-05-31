@@ -88,10 +88,58 @@ def modify_definition(d: dict) -> dict:
     for k in ["Initialize_variable_(Attachments)", "Attachments_is_null"]:
         actions.pop(k, None)
 
-    # Acción: enviar email via Office 365 Outlook
+    # Firma corporativa HTML (estática, se concatena al body del email)
+    FIRMA_HTML = (
+        '<table border="0" cellpadding="0" cellspacing="0" style="font-family:Arial,Helvetica,sans-serif;font-size:12px;color:#333333;margin-top:20px;border-top:1px solid #cccccc;max-width:600px;">'
+        '<tr><td style="padding-top:12px;">'
+        '<p style="margin:0 0 8px 0;color:#666666;">--<br>-</p>'
+        '<p style="margin:0 0 10px 0;"><img src="https://www.aiuken.com/user/themes/motor/images/logo10.jpg" alt="Aiuken Cybersecurity" width="160" style="display:block;"></p>'
+        '<p style="margin:0 0 2px 0;font-size:13px;font-weight:bold;color:#1a1a1a;">Darell P\u00e9rez Bango</p>'
+        '<p style="margin:0 0 8px 0;font-size:12px;color:#555555;">SOC Area Manager</p>'
+        '<table border="0" cellpadding="0" cellspacing="0" style="font-size:12px;">'
+        '<tr><td style="padding:1px 8px 1px 0;font-weight:bold;color:#444444;white-space:nowrap;">Email:</td>'
+        '<td><a href="mailto:darell@aiuken.com" style="color:#1a73e8;text-decoration:none;">darell@aiuken.com</a></td></tr>'
+        '<tr><td></td><td><a href="https://www.aiuken.com" style="color:#1a73e8;text-decoration:none;">www.aiuken.com</a></td></tr>'
+        '<tr><td style="padding:1px 8px 1px 0;font-weight:bold;color:#444444;white-space:nowrap;">Tel:</td><td>+34 911 41 32 19</td></tr>'
+        '<tr><td></td><td>+56 229 38 22 04</td></tr>'
+        '<tr><td style="padding:1px 8px 1px 0;font-weight:bold;color:#444444;white-space:nowrap;">Mov:</td><td>+34 648 04 45 02</td></tr>'
+        '<tr><td style="padding:1px 8px 1px 0;font-weight:bold;color:#444444;white-space:nowrap;">PGP Key ID:</td>'
+        '<td><a href="https://keys.openpgp.org/search?q=0x6DAC1D42" style="color:#1a73e8;text-decoration:none;">0x6DAC1D42</a></td></tr>'
+        '</table>'
+        '<p style="margin:12px 0 6px 0;"><img src="https://www.aiuken.com/wp-content/uploads/2025/04/Pie-Firma-Aiuken.png" alt="Aiuken Certifications" width="480" style="display:block;"></p>'
+        '<p style="margin:12px 0 2px 0;font-size:10px;color:#777777;max-width:580px;line-height:1.4;">'
+        '<strong>LEGAL NOTICE:</strong> This message and its attachments are confidential and may only be used by the person or entity to which they are addressed. '
+        'This message may contain confidential or legally protected information. There is no waiver of confidentiality or professional secrecy for any defective or erroneous transmission. '
+        'If you have received this message by mistake, notify the sender. In accordance with Regulation (EU) 2016/679 of the European Parliament and of the Council, of April 27, 2016, '
+        'on the protection of natural persons regarding the processing of personal data and the free circulation of such data, Aiuken Solutions S.L.U., informs you of the following points: '
+        'The data provided by you will become part of the activity log of the company of Aiuken Solutions S.L.U. The data provided by you will be used for management purposes of the relationship '
+        'by which they were collected, respecting the principles of legality, loyalty and transparency; limitation of purpose; minimization of treated personal data; accuracy of the personal data processed; '
+        'limitation of the term of conservation, as well as integrity and confidentiality, through the adoption of the applicable security measures. '
+        'Aiuken Solutions SL has adopted the security measures required based on the level of data involved, installing the necessary technical and organizational measures, considering the state of the technology, '
+        'in order to avoid their loss, alteration, inappropriate use or unauthorized access to them. '
+        'To exercise your rights of access, rectification, portability, opposition or deletion should be directed to the address of the controller: '
+        'Aiuken Solutions S.L.U., Calle Francisco Tom\u00e1s y Valiente, 2, 28660 Boadilla del Monte, Madrid or to the e-mail address: lopd@aiuken.com. '
+        'If you want to know more about our privacy policy, click here: www.aiuken.com</p>'
+        '<p style="margin:4px 0 0 0;font-size:10px;color:#777777;font-style:italic;">Do not print this mail if it is not necessary. Saving paper protects the environment</p>'
+        '</td></tr></table>'
+    )
+
+    # Initialize variable: Firma (se inicializa justo después de Body)
+    actions["Initialize_variable_(Firma)"] = {
+        "runAfter": {"Initialize_variable_(Body)": ["Succeeded"]},
+        "type": "InitializeVariable",
+        "inputs": {
+            "variables": [{
+                "name":  "Firma",
+                "type":  "string",
+                "value": FIRMA_HTML,
+            }]
+        },
+    }
+
     # Paso 1: publicar el informe en Teams (backup)
     actions["Publicar_informe_en_Teams"] = {
-        "runAfter": {"Initialize_variable_(Body)": ["Succeeded"]},
+        "runAfter": {"Initialize_variable_(Firma)": ["Succeeded"]},
         "type": "OpenApiConnection",
         "inputs": {
             "parameters": {
@@ -120,7 +168,7 @@ def modify_definition(d: dict) -> dict:
                 "emailMessage/Cc":         "CC@EJEMPLO.COM",
                 "emailMessage/Bcc":        "BCC@EJEMPLO.COM",
                 "emailMessage/Subject":    "@{variables('Body')?['subject']}",
-                "emailMessage/Body":       "@{variables('Body')?['html']}",
+                "emailMessage/Body":       "@{concat(variables('Body')?['html'], variables('Firma'))}",
                 "emailMessage/Importance": "Normal",
             },
             "host": {
