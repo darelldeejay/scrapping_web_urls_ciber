@@ -8,6 +8,11 @@ incidents.json
 .env.*.local
 CONFIGURACION_LOCAL.md
 
+# Artefactos Power Automate — contienen IDs de cliente/organización
+# Generados localmente con build_email_flow.py + .env
+.github/input/.env
+.github/input/*.zip
+
 # Debug and scraping artifacts (generated during CI runs)
 *_page_source.html
 .github/out/vendors/
