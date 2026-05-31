@@ -1,0 +1,29 @@
+#!/bin/sh
+# pre-commit hook: bloquea commits con datos sensibles hardcodeados
+# Instalación: git config core.hooksPath .githooks
+#
+# Para añadir o quitar palabras prohibidas, edita FORBIDDEN_PATTERNS más abajo.
+
+FORBIDDEN_PATTERNS="PICHINCHA\|portal\.banco\|security@banco\|CLIENT_NAME=\"[A-Z][A-Z]"
+
+# Solo escanear archivos staged que no sean binarios ni .env
+STAGED=$(git diff --cached --name-only --diff-filter=ACM | grep -v '\.env$\|\.zip$\|\.png$\|\.jpg$\|\.ico$')
+
+if [ -z "$STAGED" ]; then
+    exit 0
+fi
+
+FOUND=$(git diff --cached -- $STAGED | grep "^+" | grep -v "^+++" | grep -iE "$FORBIDDEN_PATTERNS")
+
+if [ -n "$FOUND" ]; then
+    echo ""
+    echo "❌ COMMIT BLOQUEADO: se detectaron posibles datos sensibles de cliente:"
+    echo "$FOUND"
+    echo ""
+    echo "  Si es un falso positivo, añade la excepción en .githooks/pre-commit"
+    echo "  o usa:  git commit --no-verify  (solo si estás seguro)"
+    echo ""
+    exit 1
+fi
+
+exit 0
