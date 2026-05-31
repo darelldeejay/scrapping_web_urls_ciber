@@ -57,7 +57,7 @@ Crear estos secrets (reemplazar con valores de tu cliente):
 # Ver si .env está siendo leído
 python -c "from common.config import get_config; cfg = get_config(); print(f'✓ {cfg.client_name}')"
 
-# Debería mostrar: ✓ BANCO PICHINCHA
+# Debería mostrar: ✓ <NOMBRE_CLIENTE>
 ```
 
 ## Paso 4: Reejecutar workflow en GitHub Actions
@@ -75,7 +75,7 @@ python -c "from common.config import get_config; cfg = get_config(); print(f'✓
 
 ### ❌ Error: "CLIENT_NAME is None o vacío"
 **Solución**: 
-- Localmente: Crear `.env` con `CLIENT_NAME="BANCO PICHINCHA"`
+- Localmente: Crear `.env` con `CLIENT_NAME="<NOMBRE_CLIENTE>"`
 - En CI: Crear secret `CLIENT_NAME` en GitHub
 
 ### ❌ Error: "TELEGRAM_BOT_TOKEN not found"
