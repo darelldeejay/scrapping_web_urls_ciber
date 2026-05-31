@@ -61,9 +61,12 @@ scripts/
   build_digest_data.py  # agrega los JSON por vendor → digest_data.json
 templates/
   dora_email.txt  # plantilla de correo en texto
-  dora_email.html # plantilla de correo en HTML (pegable)
+  dora_email.html # plantilla de correo en HTML (email al cliente)
 run_vendor.py     # orquesta ejecución por vendor (+ export JSON)
-run_digest.py     # renderiza plantillas y envía a canales
+run_digest.py     # renderiza plantillas y envía al webhook de Power Automate
+.github/input/
+  build_email_flow.py   # genera el ZIP del flujo Power Automate
+  .env.example          # plantilla de variables de entorno (sin datos reales)
 .github/workflows/status-check.yml  # pipeline CI
 requirements.txt
 ```
@@ -79,7 +82,24 @@ requirements.txt
 ### Secrets (GitHub → Settings → Secrets y variables → Actions)
 - `TELEGRAM_BOT_TOKEN`
 - `TELEGRAM_USER_ID`
-- `TEAMS_WEBHOOK_URL`
+- `TEAMS_WEBHOOK_URL` — URL del webhook de **Power Automate** (no el conector antiguo de Office 365, que está retirado)
+
+### Flujo Power Automate (entrega al cliente)
+El webhook `TEAMS_WEBHOOK_URL` apunta a un flujo Power Automate con 3 acciones:
+1. **Publicar informe en Teams** — muestra el HTML limpio (sin CSS) en el canal del SOC para monitorización
+2. **Enviar correo electrónico** — envía el HTML completo con estilos al cliente vía Office 365 Outlook
+3. **Notificar SOC** — confirmación en Teams una vez enviado el correo
+
+Para regenerar o desplegar el flujo en un nuevo tenant:
+```bash
+# 1) Copia la plantilla de variables
+cp .github/input/.env.example .github/input/.env
+# 2) Rellena .env con tus IDs reales (nunca lo commitees)
+# 3) Genera el ZIP
+python .github/input/build_email_flow.py
+# 4) Importa .github/input/WorkflowDORA_EMAIL.zip en Power Automate
+```
+> Los ZIPs están en `.gitignore` porque contienen IDs de organización. Nunca los commitees.
 
 ---
 
@@ -102,7 +122,10 @@ Workflow: `.github/workflows/status-check.yml`
      - Si marcas “Solo previsualización”, **no envía** y sube artefacto `digest-preview` con:
        - `subject.txt` · `text_body.txt` · `email.html` · `html_block.md` · `digest_data.json`.
 
-> **Canales**: Telegram recibe **TXT**; Teams recibe **HTML**.  
+> **Canales**:
+> - **Telegram** → recibe texto plano (TXT) para alertas rápidas
+> - **Teams** → recibe HTML limpio (sin CSS) en el canal del SOC; simultáneamente Power Automate envía el HTML completo con estilos por email al cliente
+>
 > Puedes elegir `both`, `telegram`, `teams` o `none` (solo preview).
 
 ---
