@@ -203,65 +203,6 @@ def send_teams(html: str, teams_html: str, subject: str, dry_run: bool) -> None:
             msg = msg[:600] + "...(truncado)"
         raise RuntimeError(f"Teams webhook error ({r.status_code}): {msg}")
 
-# ---------------- Firma corporativa ----------------
-
-def build_signature_html(signature_template: str = "templates/signature.html") -> str:
-    """Carga templates/signature.html, sustituye los {{FIRMA_*}} desde env vars y
-    devuelve el HTML final. Si el fichero no existe, devuelve cadena vacía.
-    Cada bloque opcional (logo, email, teléfono, etc.) solo se renderiza si la
-    variable de entorno correspondiente tiene valor, evitando líneas vacías.
-    """
-    if not os.path.exists(signature_template):
-        return ""
-
-    with open(signature_template, encoding="utf-8") as f:
-        tpl = f.read()
-
-    def _v(name: str) -> str:
-        return os.getenv(name, "").strip()
-
-    # Bloques opcionales: solo se incluyen si la variable tiene valor
-    def _img_bloque(url_var: str, alt: str, width: str = "150") -> str:
-        url = _v(url_var)
-        if not url:
-            return ""
-        return f'<p style="margin:8px 0 4px 0;"><img src="{url}" alt="{alt}" width="{width}" style="display:block;"></p>'
-
-    def _contact_row(label: str, value: str, is_link: bool = False, link_prefix: str = "") -> str:
-        if not value:
-            return ""
-        if is_link:
-            href = f"{link_prefix}{value}"
-            cell = f'<a href="{href}" style="color:#1a73e8;text-decoration:none;">{value}</a>'
-        else:
-            cell = value
-        return (
-            f'<tr>'
-            f'<td style="padding:1px 6px 1px 0;font-weight:bold;white-space:nowrap;color:#444444;">{label}</td>'
-            f'<td style="padding:1px 0;">{cell}</td>'
-            f'</tr>'
-        )
-
-    substitutions = {
-        "FIRMA_NOMBRE":         _v("FIRMA_NOMBRE"),
-        "FIRMA_CARGO":          _v("FIRMA_CARGO"),
-        "FIRMA_LOGO_BLOQUE":    _img_bloque("FIRMA_LOGO_URL",     "Aiuken Cybersecurity", "180"),
-        "FIRMA_EMAIL_BLOQUE":   _contact_row("Email:", _v("FIRMA_EMAIL"),  is_link=True, link_prefix="mailto:"),
-        "FIRMA_WEB_BLOQUE":     _contact_row("",       _v("FIRMA_WEB"),    is_link=True, link_prefix="https://"),
-        "FIRMA_TEL1_BLOQUE":    _contact_row("Tel:",   _v("FIRMA_TEL1")),
-        "FIRMA_TEL2_BLOQUE":    _contact_row("",       _v("FIRMA_TEL2")),
-        "FIRMA_MOV_BLOQUE":     _contact_row("Mov:",   _v("FIRMA_MOV")),
-        "FIRMA_PGP_BLOQUE":     _contact_row("PGP Key ID:", _v("FIRMA_PGP")),
-        "FIRMA_LOGOS_BLOQUE":   _img_bloque("FIRMA_LOGOS_URL",    "Certificaciones Aiuken", "420"),
-        "FIRMA_ALLURITY_BLOQUE":_img_bloque("FIRMA_ALLURITY_URL", "Allurity",              "120"),
-    }
-
-    result = tpl
-    for key, value in substitutions.items():
-        result = result.replace("{{" + key + "}}", value)
-    return result
-
-
 # ---------------- Preview writers ----------------
 
 def write_preview(preview_dir: str, subject: str, html_block_md: str, html_body: str, text_body: str) -> None:
@@ -300,13 +241,6 @@ def main():
 
     text_subject, text_body_tpl = load_text_template(args.text_template)
     html_subject, html_tpl = load_html_template(args.html_template)
-
-    # Construir firma y añadirla a los datos antes de renderizar el template
-    data["FIRMA_HTML"] = build_signature_html(
-        signature_template=os.path.join(
-            os.path.dirname(os.path.dirname(__file__)), "templates", "signature.html"
-        )
-    )
 
     text_body = render_placeholders(text_body_tpl, data)
     html_body = render_placeholders(html_tpl, data)
