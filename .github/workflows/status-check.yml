@@ -351,6 +351,18 @@ jobs:
           TELEGRAM_USER_ID: ${{ secrets.TELEGRAM_USER_ID }}
           TEAMS_WEBHOOK_URL: ${{ secrets.TEAMS_WEBHOOK_URL }}
           NOTIFY_DRY_RUN: ${{ env.NOTIFY_DRY_RUN }}
+          # Firma corporativa (datos personales — nunca hardcodeados en el repo)
+          FIRMA_NOMBRE: ${{ secrets.FIRMA_NOMBRE }}
+          FIRMA_CARGO: ${{ secrets.FIRMA_CARGO }}
+          FIRMA_EMAIL: ${{ secrets.FIRMA_EMAIL }}
+          FIRMA_WEB: ${{ secrets.FIRMA_WEB }}
+          FIRMA_TEL1: ${{ secrets.FIRMA_TEL1 }}
+          FIRMA_TEL2: ${{ secrets.FIRMA_TEL2 }}
+          FIRMA_MOV: ${{ secrets.FIRMA_MOV }}
+          FIRMA_PGP: ${{ secrets.FIRMA_PGP }}
+          FIRMA_LOGO_URL: ${{ secrets.FIRMA_LOGO_URL }}
+          FIRMA_LOGOS_URL: ${{ secrets.FIRMA_LOGOS_URL }}
+          FIRMA_ALLURITY_URL: ${{ secrets.FIRMA_ALLURITY_URL }}
         run: |
           echo "🚀 Iniciando envío de digest..."
           echo "  📤 Canales: $CHANNELS"

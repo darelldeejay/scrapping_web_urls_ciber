@@ -1,0 +1,54 @@
+<!-- Firma corporativa Aiuken Cybersecurity
+     Variables sustituidas en tiempo de ejecución desde env vars / GitHub Secrets:
+       FIRMA_NOMBRE, FIRMA_CARGO, FIRMA_EMAIL, FIRMA_WEB,
+       FIRMA_TEL1, FIRMA_TEL2, FIRMA_MOV, FIRMA_PGP,
+       FIRMA_LOGO_URL, FIRMA_LOGOS_URL, FIRMA_ALLURITY_URL
+     Si una variable no está definida, su bloque queda vacío (no rompe el email).
+-->
+<table border="0" cellpadding="0" cellspacing="0" style="font-family:Arial,sans-serif;font-size:12px;color:#333333;border-collapse:collapse;margin-top:24px;border-top:1px solid #cccccc;padding-top:12px;">
+  <tr>
+    <td style="padding-top:12px;">
+
+      <!-- Separador -->
+      <p style="margin:0 0 8px 0;font-size:12px;color:#666666;">--<br>-</p>
+
+      <!-- Logo Aiuken -->
+      {{FIRMA_LOGO_BLOQUE}}
+
+      <!-- Nombre y cargo -->
+      <p style="margin:8px 0 2px 0;font-size:13px;font-weight:bold;color:#1a1a1a;">{{FIRMA_NOMBRE}}</p>
+      <p style="margin:0 0 6px 0;font-size:12px;color:#444444;">{{FIRMA_CARGO}}</p>
+
+      <!-- Datos de contacto -->
+      <table border="0" cellpadding="0" cellspacing="0" style="font-size:12px;color:#333333;">
+        {{FIRMA_EMAIL_BLOQUE}}
+        {{FIRMA_WEB_BLOQUE}}
+        {{FIRMA_TEL1_BLOQUE}}
+        {{FIRMA_TEL2_BLOQUE}}
+        {{FIRMA_MOV_BLOQUE}}
+        {{FIRMA_PGP_BLOQUE}}
+      </table>
+
+      <!-- Logos de certificaciones -->
+      {{FIRMA_LOGOS_BLOQUE}}
+
+      <!-- Logo Allurity -->
+      {{FIRMA_ALLURITY_BLOQUE}}
+
+      <!-- Aviso legal -->
+      <p style="margin:12px 0 2px 0;font-size:10px;color:#666666;max-width:700px;line-height:1.4;">
+        <strong>LEGAL NOTICE:</strong> This message and its attachments are confidential and may only be used by the person or entity to which they are addressed.
+        This message may contain confidential or legally protected information. There is no waiver of confidentiality or professional secrecy for any defective or erroneous transmission.
+        If you have received this message by mistake, notify the sender. In accordance with Regulation (EU) 2016/679 of the European Parliament and of the Council, of April 27, 2016, on the protection of natural persons regarding the processing of personal data and the free circulation of such data, Aiuken Solutions S.L.U., informs you of the following points:<br>
+        The data provided by you will become part of the activity log of the company of Aiuken Solutions S.L.U. The data provided by you will be used for management purposes of the relationship by which they were collected, respecting the principles of legality, loyalty and transparency; limitation of purpose; minimization of treated personal data; accuracy of the personal data processed; limitation of the term of conservation, as well as integrity and confidentiality, through the adoption of the applicable security measures.
+        Aiuken Solutions SL has adopted the security measures required based on the level of data involved, installing the necessary technical and organizational measures, considering the state of the technology, in order to avoid their loss, alteration, inappropriate use or unauthorized access to them.
+        To exercise your rights of access, rectification, portability, opposition or deletion should be directed to the address of the controller: Aiuken Solutions S.L.U., Calle Francisco Tomás y Valiente, 2, 28660 Boadilla del Monte, Madrid or to the e-mail address: lopd@aiuken.com.
+        If you want to know more about our privacy policy, click here: www.aiuken.com
+      </p>
+      <p style="margin:4px 0 0 0;font-size:10px;color:#666666;font-style:italic;">
+        Do not print this mail if it is not necessary. Saving paper protects the environment
+      </p>
+
+    </td>
+  </tr>
+</table>
