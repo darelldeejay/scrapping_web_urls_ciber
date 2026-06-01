@@ -73,16 +73,17 @@ jobs:
       - name: Check Madrid time
         id: check
         run: |
-          if [ "${{ github.event_name }}" != "schedule" ]; then
-            echo "✅ Dispatch manual: sin restricción horaria."
-            echo "should_run=true" >> $GITHUB_OUTPUT
-            exit 0
-          fi
-
           TZ_MADRID=$(TZ="Europe/Madrid" date +%Z)
           CRON_TRIGGERED="${{ github.event.schedule }}"
           echo "Zona horaria actual en Madrid: $TZ_MADRID"
           echo "Cron que disparó el workflow: $CRON_TRIGGERED"
+
+          # Dispatch manual sin simulación: sin restricción horaria
+          if [ "${{ github.event_name }}" != "schedule" ] && [ "${{ inputs.simulate_backup }}" != "true" ]; then
+            echo "✅ Dispatch manual: sin restricción horaria."
+            echo "should_run=true" >> $GITHUB_OUTPUT
+            exit 0
+          fi
 
           # Detectar si es un cron de backup (11:00 Madrid) o simulación manual
           IS_BACKUP=false
