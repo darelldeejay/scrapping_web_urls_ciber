@@ -115,10 +115,14 @@ jobs:
                 -H "Authorization: Bearer $TOKEN" \
                 -H "Accept: application/vnd.github+json" \
                 "https://api.github.com/repos/$REPO/actions/runs/$RUN_ID/jobs")
+              # Cuenta como éxito SOLO si Build & send digest terminó con success.
+              # Cualquier otro resultado (failure, skipped, cancelled, never ran) = fallo.
               DIGEST_OK=$(echo "$JOBS" | jq '[.jobs[] | select(.name | contains("Build & send digest")) | select(.conclusion == "success")] | length')
-              DIGEST_FAIL=$(echo "$JOBS" | jq '[.jobs[] | select(.name | contains("Build & send digest")) | select(.conclusion == "failure")] | length')
-              [ "$DIGEST_OK" -gt 0 ]   && SUCCESS_COUNT=$((SUCCESS_COUNT + 1))
-              [ "$DIGEST_FAIL" -gt 0 ] && FAILED_COUNT=$((FAILED_COUNT + 1))
+              if [ "$DIGEST_OK" -gt 0 ]; then
+                SUCCESS_COUNT=$((SUCCESS_COUNT + 1))
+              else
+                FAILED_COUNT=$((FAILED_COUNT + 1))
+              fi
             done
 
             echo "Runs con digest exitoso hoy: $SUCCESS_COUNT"
