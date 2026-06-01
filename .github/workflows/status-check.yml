@@ -29,6 +29,11 @@ on:
         required: false
         default: ""
         type: string
+      simulate_backup:
+        description: "Simular lógica de backup (11:00) para verificar que funciona — usa dry_run=true para no enviar nada"
+        required: false
+        default: "false"
+        type: boolean
   schedule:
     # � CRON: 7:30 AM hora Madrid (margen para retrasos de GitHub Actions ~30 min)
     #   Invierno (CET  = UTC+1): 07:30 Madrid → 06:30 UTC
@@ -79,10 +84,14 @@ jobs:
           echo "Zona horaria actual en Madrid: $TZ_MADRID"
           echo "Cron que disparó el workflow: $CRON_TRIGGERED"
 
-          # Detectar si es un cron de backup (11:00 Madrid)
+          # Detectar si es un cron de backup (11:00 Madrid) o simulación manual
           IS_BACKUP=false
           if [ "$TZ_MADRID" = "CEST" ] && [ "$CRON_TRIGGERED" = "0 9 * * *" ]; then IS_BACKUP=true; fi
           if [ "$TZ_MADRID" = "CET"  ] && [ "$CRON_TRIGGERED" = "0 10 * * *" ]; then IS_BACKUP=true; fi
+          if [ "${{ inputs.simulate_backup }}" = "true" ]; then
+            echo "🧪 Simulación de backup activada manualmente."
+            IS_BACKUP=true
+          fi
 
           # --- CRON DE BACKUP: solo ejecutar si los 2 intentos anteriores fallaron ---
           if [ "$IS_BACKUP" = "true" ]; then
