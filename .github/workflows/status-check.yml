@@ -30,12 +30,12 @@ on:
         default: ""
         type: string
   schedule:
-    # 🕗 CRON: 8:30 AM hora Madrid en ambos horarios:
-    #   Invierno (CET  = UTC+1): 08:30 Madrid → 07:30 UTC
-    #   Verano   (CEST = UTC+2): 08:30 Madrid → 06:30 UTC
-    # El job gatekeeper verifica que sea la hora 08 en Madrid antes de continuar.
-    - cron: "30 7 * * *"   # invierno
-    - cron: "30 6 * * *"   # verano
+    # � CRON: 7:30 AM hora Madrid (margen para retrasos de GitHub Actions ~30 min)
+    #   Invierno (CET  = UTC+1): 07:30 Madrid → 06:30 UTC
+    #   Verano   (CEST = UTC+2): 07:30 Madrid → 05:30 UTC
+    # El job gatekeeper verifica que sea la hora 07 u 08 en Madrid antes de continuar.
+    - cron: "30 6 * * *"   # invierno (CET)
+    - cron: "30 5 * * *"   # verano  (CEST)
 
 concurrency:
   # Los crons agendados reciben su propio run_id como grupo → nunca se cancelan
@@ -57,7 +57,7 @@ env:
 
 jobs:
   gatekeeper:
-    name: "Verificar horario (Madrid 08:xx-09:xx)"
+    name: "Verificar horario (Madrid 07:xx-08:xx)"
     runs-on: ubuntu-latest
     outputs:
       should_run: ${{ steps.check.outputs.should_run }}
@@ -76,31 +76,31 @@ jobs:
           echo "Zona horaria actual en Madrid: $TZ_MADRID"
           echo "Cron que disparó el workflow: $CRON_TRIGGERED"
 
-          # 1. En verano (CEST): Solo permitimos el cron programado a las 06:30 UTC (08:30 local)
-          if [ "$TZ_MADRID" = "CEST" ] && [ "$CRON_TRIGGERED" != "30 6 * * *" ]; then
+          # 1. En verano (CEST): Solo permitimos el cron programado a las 05:30 UTC (07:30 local)
+          if [ "$TZ_MADRID" = "CEST" ] && [ "$CRON_TRIGGERED" != "30 5 * * *" ]; then
             echo "⏭️  Estamos en horario de verano (CEST). Se descarta el cron de invierno ($CRON_TRIGGERED) para evitar doble envío tardío."
             echo "should_run=false" >> $GITHUB_OUTPUT
             exit 0
           fi
 
-          # 2. En invierno (CET): Solo permitimos el cron programado a las 07:30 UTC (08:30 local)
-          if [ "$TZ_MADRID" = "CET" ] && [ "$CRON_TRIGGERED" != "30 7 * * *" ]; then
+          # 2. En invierno (CET): Solo permitimos el cron programado a las 06:30 UTC (07:30 local)
+          if [ "$TZ_MADRID" = "CET" ] && [ "$CRON_TRIGGERED" != "30 6 * * *" ]; then
             echo "⏭️  Estamos en horario de invierno (CET). Se descarta el cron de verano ($CRON_TRIGGERED)."
             echo "should_run=false" >> $GITHUB_OUTPUT
             exit 0
           fi
 
-          # 3. Ventana de hora de respaldo en Madrid (08:xx - 09:xx) para tolerar colas en GitHub Actions
+          # 3. Ventana de hora de respaldo en Madrid (07:xx - 08:xx) para tolerar colas en GitHub Actions
           HORA_MADRID=$(TZ="Europe/Madrid" date +%H)
           MINUTO_MADRID=$(TZ="Europe/Madrid" date +%M)
           echo "Hora en Madrid al iniciar: ${HORA_MADRID}:${MINUTO_MADRID}"
 
           OK=false
+          [ "$HORA_MADRID" = "07" ] && OK=true
           [ "$HORA_MADRID" = "08" ] && OK=true
-          [ "$HORA_MADRID" = "09" ] && OK=true
 
           if [ "$OK" = "true" ]; then
-            echo "✅ Hora dentro de la ventana de tolerancia (08:00-09:59). Procediendo."
+            echo "✅ Hora dentro de la ventana de tolerancia (07:00-08:59). Procediendo."
             echo "should_run=true" >> $GITHUB_OUTPUT
           else
             echo "⏭️  Hora ${HORA_MADRID}:${MINUTO_MADRID} fuera de ventana. Saltando."
