@@ -169,7 +169,8 @@ jobs:
             exit 0
           fi
 
-          # 3. Ventana de hora de respaldo en Madrid (07:xx - 08:xx) para tolerar colas en GitHub Actions
+          # 3. Ventana de hora de respaldo en Madrid (07:xx - 10:xx) para tolerar colas de GitHub Actions
+          # GitHub puede retrasar crons hasta 3h. El backup a las 11:00 sigue siendo el último recurso.
           HORA_MADRID=$(TZ="Europe/Madrid" date +%H)
           MINUTO_MADRID=$(TZ="Europe/Madrid" date +%M)
           echo "Hora en Madrid al iniciar: ${HORA_MADRID}:${MINUTO_MADRID}"
@@ -177,9 +178,11 @@ jobs:
           OK=false
           [ "$HORA_MADRID" = "07" ] && OK=true
           [ "$HORA_MADRID" = "08" ] && OK=true
+          [ "$HORA_MADRID" = "09" ] && OK=true
+          [ "$HORA_MADRID" = "10" ] && OK=true
 
           if [ "$OK" = "true" ]; then
-            echo "✅ Hora dentro de la ventana de tolerancia (07:00-08:59). Procediendo."
+            echo "✅ Hora dentro de la ventana de tolerancia (07:00-10:59). Procediendo."
             echo "should_run=true" >> $GITHUB_OUTPUT
           else
             echo "⏭️  Hora ${HORA_MADRID}:${MINUTO_MADRID} fuera de ventana. Saltando."
